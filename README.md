@@ -1,4 +1,4 @@
-# Personlig kunskapsbas
+# Personlig kunskapsbas - Gemmera
 
 **DD1349 VT26 — Projektuppgift i introduktion till datalogi**
 
