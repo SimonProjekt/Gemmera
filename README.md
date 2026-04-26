@@ -17,6 +17,26 @@ Kärnfunktioner:
 
 Fejkpersonen "Jonas Berg" (dagböcker, brev och bokrecensioner på svenska) medföljer som demo-vault så allt fungerar direkt efter installation.
 
+## Distribution
+
+Planen är att publicera Gemmera på GitHub under MIT-licens. README:n kommer att innehålla en installations-checklista och en lista över beroenden. Exakt innehåll fastställs senare i projektet — nedan är ett **exempel** på hur det skulle kunna se ut.
+
+*Exempel på installations-checklista:*
+
+- **Klona repo** — t.ex. `git clone` av Gemmera-repot till valfri plats.
+- **Installera beroenden** — t.ex. `npm install` i projektmappen.
+- **Bygg plugin** — t.ex. `npm run build` för att generera `main.js`.
+- **Kopiera till vault** — t.ex. lägg `main.js`, `manifest.json` och `styles.css` i `<vault>/.obsidian/plugins/gemmera/`.
+- **Aktivera** — t.ex. slå på Gemmera under Obsidians inställningar → Community plugins.
+
+*Exempel på beroenden:*
+
+- **Obsidian** (t.ex. ≥ 1.5)
+- **Node.js** och **npm** — för bygget.
+- **Ollama** — lokalt installerad och igång.
+- **Gemma-modell** — hämtas via Ollama (storlek beroende på hårdvara).
+- **Rekommenderat:** ~8 GB RAM för mindre modell, mer för större varianter.
+
 ## Säkerhetsprinciper
 
 - Preview-innan-skriv som default för alla filändringar.
@@ -27,8 +47,7 @@ Fejkpersonen "Jonas Berg" (dagböcker, brev och bokrecensioner på svenska) medf
 
 ## Teknisk stack
 
-TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, Markdown med Obsidian-kompatibla wikilinks, Claude API för engångsgenerering av demo-persona.
-
+TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, Markdown med Obsidian-kompatibla wikilinks.
 ## Tidsplan — 4 veckor
 
 ### Vecka 1 ✅ (grund)
@@ -57,3 +76,5 @@ TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, M
 Par-projekt. Person A: Ollama-integration och LLM-prompting/verktygsanrop. Person B: Obsidian-plugin-UI, chat-panel, persona-generering. Båda deltar i planering varje vecka; review-rollen roterar.
 
 Se [projektbeskrivning.md](projektbeskrivning.md) för fullständig specifikation.
+
+
