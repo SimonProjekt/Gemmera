@@ -17,3 +17,11 @@
 //! - issue #11: `embedder`
 
 pub mod contracts;
+pub mod db;
+pub mod error;
+pub mod paths;
+
+mod migrations;
+
+pub use db::IndexerDb;
+pub use error::{IndexerError, Result};
