@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/ingest_content.json",
+  "title": "ingest_content",
+  "description": "Begin ingestion of raw user content. Call this as the first step of the ingest loop, before deciding how to store it. Returns a structured NoteSpec candidate (parsed title, type guess, summary, tags, body markdown). Pure parsing only; performs no writes and no retrieval. Follow up with retrieve_similar_notes to dedup-check before save_note.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["content", "source"],
+  "properties": {
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The raw user content to ingest. Pasted text, transcript output, OCR output, page text, etc. Pass it verbatim — do not pre-summarize. Must be non-empty; if you have nothing to ingest, do not call this tool."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["chat-paste", "pdf", "webpage", "image", "audio", "manual"],
+      "description": "Where the content came from. Use 'chat-paste' for arbitrary text the user pasted into chat, 'manual' when the user is dictating a note, and the file-type-specific values when the upload was a file of that kind. This value is propagated into the saved note's frontmatter.source so retrieval can filter by origin."
+    },
+    "instructions": {
+      "type": ["string", "null"],
+      "description": "Optional free-text instruction the user gave alongside the content (e.g. 'split into per-attendee notes', 'tag as q2-planning'). Pass null when the user gave no instruction. Do not invent instructions; the parser respects this field literally."
+    }
+  }
+}

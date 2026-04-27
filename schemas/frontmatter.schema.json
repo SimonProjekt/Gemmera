@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.dev/schemas/frontmatter.schema.json",
+  "title": "Cowork frontmatter contract",
+  "description": "The strict JSON object Gemma fills when proposing a new note. See planning/rag.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "type",
+    "tags",
+    "aliases",
+    "source",
+    "entities",
+    "related",
+    "status",
+    "summary",
+    "key_points",
+    "body_markdown",
+    "cowork"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "type": {
+      "type": "string",
+      "enum": ["source", "evergreen", "project", "meeting", "person", "concept"]
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source": {
+      "type": "string",
+      "enum": ["chat-paste", "pdf", "webpage", "image", "audio", "manual"]
+    },
+    "entities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "related": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["inbox", "processed", "linked", "archived"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 600
+    },
+    "key_points": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "body_markdown": {
+      "type": "string"
+    },
+    "cowork": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "run_id", "model", "version", "confidence"],
+      "properties": {
+        "source": { "type": "string" },
+        "run_id": { "type": "string" },
+        "model": { "type": "string" },
+        "version": { "type": "string" },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        }
+      }
+    }
+  }
+}

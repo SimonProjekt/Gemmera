@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/update_index.json",
+  "title": "update_index",
+  "description": "Re-chunk and re-embed the listed notes, refresh BM25 entries, and reconcile graph links. Call after save_note succeeds, with the saved path(s). Idempotent: if a note's content_hash hasn't changed since the last index pass, the work is skipped automatically. Returns (not modeled here for v1) a summary {indexed: int, skipped: int, failed: [{path, error}]}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["paths"],
+  "properties": {
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Vault-relative path to a Markdown note that needs reindexing."
+      },
+      "description": "Vault-relative paths to reindex. Pass exactly the notes whose content changed in this turn. Do not pass the whole vault — for full rebuilds, the user has a dedicated 'rebuild index' affordance in settings. Paths must be vault-relative and must not contain '..' segments."
+    }
+  }
+}

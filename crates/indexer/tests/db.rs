@@ -40,7 +40,11 @@ fn fresh_open_creates_file_and_applies_meta() {
     assert!(expected.exists(), "index file should exist at {expected:?}");
     assert_eq!(db.path(), expected.as_path());
 
-    assert_eq!(read_schema_version(&db), "0");
+    // Schema version reflects the latest embedded migration. Don't pin a
+    // literal here — every new migration would force a one-line edit. We just
+    // assert that *something* applied (>= 0).
+    let v: u32 = read_schema_version(&db).parse().unwrap();
+    assert!(v >= 1, "schema_version should be at least 1, got {v}");
 
     let exts = loaded_extensions(&db);
     assert!(exts.iter().any(|e| e == "vss"), "vss not loaded: {exts:?}");
@@ -50,12 +54,12 @@ fn fresh_open_creates_file_and_applies_meta() {
 #[test]
 fn idempotent_reopen() {
     let tmp = TempDir::new().unwrap();
-    {
+    let v_first = {
         let db = IndexerDb::open(tmp.path()).unwrap();
-        assert_eq!(read_schema_version(&db), "0");
-    }
+        read_schema_version(&db)
+    };
     let db = IndexerDb::open(tmp.path()).expect("re-open");
-    assert_eq!(read_schema_version(&db), "0");
+    assert_eq!(read_schema_version(&db), v_first);
 }
 
 #[test]

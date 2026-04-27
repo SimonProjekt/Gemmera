@@ -19,7 +19,12 @@
 pub mod contracts;
 pub mod db;
 pub mod error;
+pub mod events;
+pub mod frontmatter;
+pub mod jobs;
 pub mod paths;
+pub mod reranker;
+pub mod tools;
 
 mod migrations;
 

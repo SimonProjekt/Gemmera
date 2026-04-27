@@ -1,0 +1,42 @@
+[
+  {
+    "name": "ingest_content",
+    "schema_path": "ingest_content.json",
+    "description": "Parse raw user content into a structured NoteSpec candidate. First step of the ingest loop."
+  },
+  {
+    "name": "retrieve_similar_notes",
+    "schema_path": "retrieve_similar_notes.json",
+    "description": "Vector-only nearest-neighbor lookup. Used during ingest to dedup-check a candidate before save."
+  },
+  {
+    "name": "save_note",
+    "schema_path": "save_note.json",
+    "description": "Persist a note to the vault under the strict frontmatter contract. Goes through preview gate."
+  },
+  {
+    "name": "update_index",
+    "schema_path": "update_index.json",
+    "description": "Re-chunk and re-embed the listed notes after a save. Idempotent on unchanged content_hash."
+  },
+  {
+    "name": "search_notes",
+    "schema_path": "search_notes.json",
+    "description": "Hybrid retrieval (vector + BM25 + graph boost) over the chunk index. Primary entry point for the query loop."
+  },
+  {
+    "name": "rerank_results",
+    "schema_path": "rerank_results.json",
+    "description": "Cross-encoder rerank of search_notes candidates. Skip for mode='literal'."
+  },
+  {
+    "name": "get_note_context",
+    "schema_path": "get_note_context.json",
+    "description": "Fetch full note bodies and frontmatter for a small set of paths."
+  },
+  {
+    "name": "create_synthesis_note",
+    "schema_path": "create_synthesis_note.json",
+    "description": "Write a synthesis note grounded in multiple existing notes."
+  }
+]

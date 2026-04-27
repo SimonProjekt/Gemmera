@@ -39,6 +39,7 @@ impl IndexerDb {
         load_extensions(&conn);
         let migs = migrations::embedded_migrations()?;
         migrations::run(&mut conn, &migs)?;
+        ensure_extension_indexes(&conn);
         Ok(Self { conn, path })
     }
 
@@ -53,6 +54,7 @@ impl IndexerDb {
         load_extensions(&conn);
         let migs = migrations::migrations_from_dir(migrations_dir)?;
         migrations::run(&mut conn, &migs)?;
+        ensure_extension_indexes(&conn);
         Ok(Self { conn, path })
     }
 
@@ -90,6 +92,49 @@ fn load_extensions(conn: &Connection) {
             // downstream code that actually needs vss/fts will surface the
             // failure with better context.
             tracing::warn!(extension = ext, error = %e, "LOAD failed");
+        }
+    }
+    // Required by the persistent HNSW index created in migration 0001 to be
+    // loadable on reopen. Session-scoped, so applied on every connection.
+    if let Err(e) = conn.execute_batch("SET hnsw_enable_experimental_persistence = true;") {
+        tracing::warn!(error = %e, "could not enable hnsw_enable_experimental_persistence");
+    }
+}
+
+/// Idempotent post-migration step: create the HNSW vector index on
+/// `embeddings.vec` and the BM25 FTS index on `chunks.text_for_embed` if they
+/// don't already exist. These can't live in migration 0001 because they
+/// involve `vss`/`fts` machinery that needs the underlying tables to be
+/// catalog-visible to a fresh statement (which the in-transaction migration
+/// body doesn't satisfy on DuckDB 1.10).
+///
+/// All errors are warn-logged rather than returned. Two reasons:
+/// 1. On a host where `vss`/`fts` failed to load (rare, sandboxed envs), we
+///    still want the rest of the indexer to be usable for non-vector queries.
+/// 2. `PRAGMA create_fts_index` on an existing index emits a benign error;
+///    swallowing it is simpler than special-casing.
+fn ensure_extension_indexes(conn: &Connection) {
+    let hnsw = "CREATE INDEX IF NOT EXISTS idx_embeddings_vec \
+                ON embeddings USING HNSW (vec) WITH (metric = 'cosine');";
+    if let Err(e) = conn.execute_batch(hnsw) {
+        tracing::warn!(error = %e, "HNSW index creation skipped");
+    }
+
+    // PRAGMA create_fts_index is not idempotent in 1.10 — it errors if the
+    // index already exists. Detect via information_schema.
+    let fts_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'fts_main_chunks'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !fts_exists {
+        if let Err(e) =
+            conn.execute_batch("PRAGMA create_fts_index('chunks', 'id', 'text_for_embed');")
+        {
+            tracing::warn!(error = %e, "FTS index creation skipped");
         }
     }
 }

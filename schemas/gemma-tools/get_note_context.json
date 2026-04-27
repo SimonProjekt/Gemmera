@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/get_note_context.json",
+  "title": "get_note_context",
+  "description": "Fetch full note bodies plus parsed frontmatter for a small set of paths. Use during the query loop when reranked chunks are not enough and Gemma needs the surrounding note in full to answer correctly (e.g. step-by-step procedures, full quoted blocks, tables that were chunked). Do not use this as a substitute for search_notes — it does not search, it only reads. Result shape (not modeled here for v1): an array of {path, title, frontmatter, body_markdown, chunks?: [...]}, in the same order as the input paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["paths"],
+  "properties": {
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Vault-relative path to a Markdown note in the index. Must not contain '..' segments."
+      },
+      "description": "Vault-relative note paths to fetch. Keep this list short (<= 16) — full bodies are token-heavy and large lists blow the context budget. Order matters: the result list mirrors the input order so you can correlate them in subsequent prompts."
+    }
+  }
+}

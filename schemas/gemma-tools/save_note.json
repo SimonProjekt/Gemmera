@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/save_note.json",
+  "title": "save_note",
+  "description": "Persist a note to the vault. The app validates the note object against the frontmatter contract, then composes the final Markdown file. Always passes through the user's preview gate before the actual write happens unless 'Always preview before save' is disabled. Does NOT update the index — the orchestrator calls update_index afterward with the saved path. Use mode='create' for a brand-new note, mode='update' for an additive update to an existing note (v1 update is append-only under a dated heading; full-body replacement is deferred).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["note", "mode"],
+  "properties": {
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The strict frontmatter+body object the app will write. Field set must match the frontmatter contract from planning/rag.md. Anything off-schema is rejected and the model is asked to retry once.",
+      "required": [
+        "title",
+        "type",
+        "tags",
+        "aliases",
+        "source",
+        "entities",
+        "related",
+        "status",
+        "summary",
+        "key_points",
+        "body_markdown",
+        "cowork"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Human-readable note title. Required, non-empty, at most 120 characters. Used as the H1 of the file and as the filename basis. Do not include path separators or file extensions."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["source", "evergreen", "project", "meeting", "person", "concept"],
+          "description": "Note category. 'source' for raw captured material, 'evergreen' for a polished standalone idea, 'project' for ongoing work, 'meeting' for meeting notes, 'person' for a person profile, 'concept' for a definitional note. Pick the closest fit; do not invent new values."
+        },
+        "tags": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Free-form topical tags, lowercase, no leading '#'. Prefer reusing existing vault tags surfaced by retrieve_similar_notes over inventing new ones."
+        },
+        "aliases": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Alternative titles or short names for this note (e.g. acronyms). Empty array is fine; do not include the canonical title here."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["chat-paste", "pdf", "webpage", "image", "audio", "manual"],
+          "description": "Origin of the note's raw content. Mirror the value passed to ingest_content unless the user has explicitly recategorized."
+        },
+        "entities": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Named entities mentioned in the note (people, projects, products). Used as boost signals during retrieval. Do not include generic words; only proper nouns or stable handles."
+        },
+        "related": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Vault-relative paths of notes this one links to. Should come from retrieve_similar_notes. Paths that don't exist yet are allowed and surface in the preview UI as new-link suggestions."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["inbox", "processed", "linked", "archived"],
+          "description": "Lifecycle stage. New ingests default to 'inbox'. Only set higher values when you have a specific reason; the user reviews from inbox and promotes manually."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A 1-3 sentence summary of the note. Used in retrieval previews and in the dedup decision UI. Keep it dense; this is the chunk most often shown to other turns."
+        },
+        "key_points": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Three-to-seven bullet-point takeaways. One idea per item. Empty array is allowed when the source content is too short for distinct points."
+        },
+        "body_markdown": {
+          "type": "string",
+          "description": "The full Markdown body of the note. MUST NOT contain its own YAML frontmatter block — the app composes that from the structured fields above. Headings, code blocks, lists, tables are all fine."
+        },
+        "cowork": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Provenance block stamped by the app on every Cowork-managed write. The model fills these fields from the current run context; the app re-validates before write.",
+          "required": ["source", "run_id", "model", "version", "confidence"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": ["ingest", "synthesis", "manual"],
+              "description": "Which Cowork pipeline produced this note. 'ingest' for the capture loop, 'synthesis' for create_synthesis_note, 'manual' for user-driven edits."
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "ULID/UUID identifying the turn that produced this note. Used to correlate with the events log."
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Identifier of the orchestration model (e.g. 'gemma4-e4b'). Stamped for eval traceability."
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Cowork plugin version (semver string). Stamped so prompt-revision regressions are bisectable."
+            },
+            "confidence": {
+              "type": "string",
+              "enum": ["high", "medium", "low"],
+              "description": "Self-reported confidence in the structured fields. 'low' forces the preview UI into 'needs review' mode regardless of user defaults."
+            }
+          }
+        }
+      }
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["create", "update"],
+      "description": "'create' writes a brand-new file. 'update' appends content under a dated heading inside an existing note (v1 is append-only). Choose 'update' when DECIDE_STRATEGY classified the candidate as append-compatible with an existing path; otherwise choose 'create'."
+    },
+    "target_path": {
+      "type": ["string", "null"],
+      "description": "Vault-relative path. REQUIRED (non-null) when mode='update' — it identifies the existing note to append to. For mode='create', pass null to let the app choose a path under the inbox folder, or pass an explicit path the user requested. Must NOT contain '..' segments."
+    }
+  }
+}

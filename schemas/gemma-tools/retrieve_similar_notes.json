@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/retrieve_similar_notes.json",
+  "title": "retrieve_similar_notes",
+  "description": "Vector-only nearest-neighbor lookup against the chunk embedding index. Use this during ingestion to dedup-check a new note candidate before save_note. This is intentionally narrower than search_notes: no BM25, no graph boost, no rerank — it is fast and meant for the 'is this a near-duplicate of something we already have?' question. Result (not modeled here for v1): an array of {note_path, title, score, top_chunk_text, heading_path} ordered by descending cosine similarity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text"],
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The text to embed and search by. Typically the body_markdown of the in-flight ingest candidate, or the user's pasted content, or a concatenation of title + summary. Must be non-empty."
+    },
+    "top_k": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 8,
+      "description": "How many neighbor notes to return. Defaults to 8 if omitted. Keep small (<=12) for dedup checks; larger values are wasteful since you only need to know whether anything crosses the dup threshold."
+    }
+  }
+}

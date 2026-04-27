@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/rerank_results.json",
+  "title": "rerank_results",
+  "description": "Run a cross-encoder reranker (default bge-reranker-v2-m3) over the candidate set returned by search_notes and narrow it to the top_k most relevant chunks for the query. Skip this call when search_notes was invoked with mode='literal'. Result shape (not modeled here for v1): an array of {chunk_id, score, text, note_path} ordered by descending rerank score, length == top_k.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query", "candidates", "top_k"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The same query string passed to search_notes. The reranker scores each candidate's relevance to this query."
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The candidate set from search_notes. Pass through the chunk_id, retrieval score, and chunk text for every candidate. Do NOT filter or reorder before reranking — the whole point is to let the cross-encoder do that.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["chunk_id", "score", "text"],
+        "properties": {
+          "chunk_id": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The chunks.id from the retrieval result. Used to thread results back to the original retrieval payload after reranking."
+          },
+          "score": {
+            "type": "number",
+            "description": "The retrieval score from search_notes. Useful as a tiebreaker if the reranker abstains; pass the value through unchanged."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The chunk text the reranker will read. Use chunks.text_for_embed (title+heading-prefixed) for best reranker accuracy."
+          }
+        }
+      }
+    },
+    "top_k": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "How many top results to keep after reranking. Default for v1 is 8; only override if the user asked for an unusually wide or narrow context."
+    }
+  }
+}

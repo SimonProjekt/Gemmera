@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/search_notes.json",
+  "title": "search_notes",
+  "description": "Primary retrieval entry point for the query loop. Runs hybrid (vector + BM25 + graph boost) retrieval over the chunk index and returns ~top_k candidates with metadata (note_path, title, heading_path, chunk text, score, why-matched tag). The orchestrator typically follows this with rerank_results before sending context to Gemma. Result shape (not modeled here for v1) is an array of {chunk_id, note_path, title, heading_path, text, score, signal: 'semantic'|'lexical'|'backlink'|'tag'|'recency_boost'}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query", "mode", "top_k"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The user's question or a paraphrase. For natural-language questions pass the raw user query; for keyword lookups extract the salient phrase. Must be non-empty."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["hybrid", "semantic", "lexical", "literal"],
+      "description": "Retrieval mode. 'hybrid' (default choice): vector + BM25 + graph boosts, the right answer for almost every query. 'semantic': vector-only, useful for paraphrased lookups when filenames don't matter. 'lexical': BM25-only, for keyword-heavy queries. 'literal': exact-substring lookup, for quoted phrases, exact filenames, or exact tags — skips reranking entirely."
+    },
+    "top_k": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "How many candidates to return BEFORE reranking. Use 30 for a typical hybrid run that will be reranked down to 8. Use 8 directly for 'literal' mode where reranking is skipped."
+    }
+  }
+}

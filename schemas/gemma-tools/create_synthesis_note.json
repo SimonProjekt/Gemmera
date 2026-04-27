@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cowork.local/schemas/gemma-tools/create_synthesis_note.json",
+  "title": "create_synthesis_note",
+  "description": "Compose a new note that synthesizes an answer over multiple existing notes and write it to the vault. Used at the end of a query turn when the user asks for the answer to be saved (e.g. 'save this as a note'). The app runs the synthesis-writer prompt internally to produce the body; the orchestrator only supplies the question and the source paths. Always passes through the preview gate. Always writes with cowork.source = 'synthesis'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query", "sources"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The user's original question, verbatim. Becomes the basis of the synthesis note's title and the framing of the synthesized body."
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Vault-relative path to a note that should be cited in the synthesis. Must not contain '..' segments."
+      },
+      "description": "The set of source notes the synthesis is grounded in. Pass the paths from the reranked retrieval payload that were actually used in the answer — every cited path in the synthesis body must appear here."
+    },
+    "target_path": {
+      "type": ["string", "null"],
+      "description": "Vault-relative path where the synthesis note should be written. Pass null to let the app choose a path under the synthesis folder. Must not contain '..' segments. Must not collide with an existing note unless the user explicitly asked to overwrite (which v1 does not support — use a different path)."
+    }
+  }
+}
