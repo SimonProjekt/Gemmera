@@ -1,0 +1,83 @@
+.gemmera-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+
+.gemmera-status {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.gemmera-status--ok { color: var(--color-green); }
+.gemmera-status--error { color: var(--color-red); }
+
+.gemmera-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gemmera-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 90%;
+}
+
+.gemmera-message--user { align-self: flex-end; text-align: right; }
+.gemmera-message--assistant { align-self: flex-start; }
+
+.gemmera-message__role {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.gemmera-message__text {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--background-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.gemmera-message--user .gemmera-message__text {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.gemmera-input-area {
+  padding: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gemmera-input {
+  width: 100%;
+  resize: none;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.gemmera-input:focus { outline: none; border-color: var(--interactive-accent); }
+
+.gemmera-send {
+  align-self: flex-end;
+}
