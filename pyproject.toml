@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gemmera"
+version = "0.1.0"
+description = "Local knowledge base CLI powered by Gemma 4 via Ollama"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "ollama>=0.2",
+    "rich>=13.0",
+]
+
+[project.scripts]
+kb = "kb.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

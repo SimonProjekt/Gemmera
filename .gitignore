@@ -1,1 +1,17 @@
 bootstrap-prompt.md
+
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+*.egg-info/
+
+# Vault generated content — not tracked in git
+vault/wiki/*
+vault/outputs/*
+!vault/wiki/.gitkeep
+!vault/outputs/.gitkeep
