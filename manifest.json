@@ -1,0 +1,10 @@
+{
+  "id": "gemmera",
+  "name": "Gemmera",
+  "version": "0.0.1",
+  "minAppVersion": "1.4.0",
+  "description": "Local knowledge base powered by Gemma 4 via Ollama. Chat with your vault — everything stays on your machine.",
+  "author": "SimonProjekt",
+  "authorUrl": "https://github.com/SimonProjekt/Gemmera",
+  "isDesktopOnly": true
+}

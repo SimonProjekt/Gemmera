@@ -1,1 +1,16 @@
 bootstrap-prompt.md
+
+# Plugin build output
+main.js
+main.js.map
+styles.css.map
+
+# Dependencies
+node_modules/
+
+# Obsidian workspace state (not source)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Dev
+.hotreload
