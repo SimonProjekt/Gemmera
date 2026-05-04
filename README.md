@@ -47,3 +47,5 @@ TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, M
 Par-projekt. Person A: Ollama-integration och LLM-prompting/verktygsanrop. Person B: Obsidian-plugin-UI, chat-panel, persona-generering. Båda deltar i planering varje vecka; review-rollen roterar.
 
 Se [projektbeskrivning.md](projektbeskrivning.md) för fullständig specifikation.
+
+<!-- test change -->
