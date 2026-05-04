@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import { detectOllama, pickGemmaModel, chat, Message } from "./ollama";
+import { searchVault, buildContextPrompt } from "./search";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -87,7 +88,13 @@ export class GemmeraChatView extends ItemView {
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
 
     try {
-      const reply = await chat(this.model, this.history, (token) => {
+      const searchResults = await searchVault(this.app, text);
+      const contextPrompt = buildContextPrompt(searchResults);
+      const messagesWithContext: Message[] = contextPrompt
+        ? [{ role: "user", content: contextPrompt }, { role: "assistant", content: "Förstått, jag har läst anteckningarna." }, ...this.history]
+        : this.history;
+
+      const reply = await chat(this.model, messagesWithContext, (token) => {
         textEl.textContent += token;
         this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
       });
