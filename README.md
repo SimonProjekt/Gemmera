@@ -38,10 +38,13 @@ TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, M
 - [x] Chat-panel med konversationshistorik
 - [x] Persona-generering (Jonas Berg, svenska anteckningar)
 
-### Vecka 2 (full MVP)
-- [ ] Verktyg för filskapande, läsning och uppdatering
-- [ ] Preview-dialog
-- [ ] Tester på Jonas-vaulten
+### Vecka 2 ✅ (full MVP)
+- [x] Verktyg för filskapande, läsning och uppdatering
+- [x] Preview-dialog
+- [x] Vault-sökning med citat
+
+### Vecka 3 (utökning)
+- [ ] Inkrementell indexering
 
 **Slutacceptans:** en ny person installerar pluginet, följer README, och har en fungerande chatt som kan skapa filer i sin vault inom 20 min på en typisk 8 GB-bärbar.
 
