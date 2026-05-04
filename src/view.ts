@@ -1,6 +1,7 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import { detectOllama, pickGemmaModel, chat, Message } from "./ollama";
 import { searchVault, buildContextPrompt } from "./search";
+import { parseFileOps, handleFileOps } from "./fileops";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -99,6 +100,8 @@ export class GemmeraChatView extends ItemView {
         this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
       });
       this.history.push({ role: "assistant", content: reply });
+      const ops = parseFileOps(reply);
+      if (ops.length > 0) await handleFileOps(this.app, ops);
     } catch (err) {
       textEl.textContent = `Fel: ${err instanceof Error ? err.message : "okänt fel"}`;
       assistantEl.addClass("gemmera-message--error");
