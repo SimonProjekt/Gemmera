@@ -1,11 +1,14 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
-import { detectOllama } from "./ollama";
+import { detectOllama, pickGemmaModel, chat, Message } from "./ollama";
 
 export const VIEW_TYPE = "gemmera-chat";
 
 export class GemmeraChatView extends ItemView {
   private messagesEl: HTMLElement;
   private inputEl: HTMLTextAreaElement;
+  private sendBtn: HTMLButtonElement;
+  private history: Message[] = [];
+  private model = "gemma3:latest";
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
@@ -31,6 +34,7 @@ export class GemmeraChatView extends ItemView {
     // Status bar
     const statusEl = container.createEl("div", { cls: "gemmera-status" });
     this.checkOllamaStatus(statusEl);
+    pickGemmaModel().then((m) => { this.model = m; }).catch(() => {});
 
     // Messages area
     this.messagesEl = container.createEl("div", { cls: "gemmera-messages" });
@@ -41,11 +45,11 @@ export class GemmeraChatView extends ItemView {
       cls: "gemmera-input",
       attr: { placeholder: "Skriv ett meddelande...", rows: "3" },
     });
-    const sendBtn = inputArea.createEl("button", {
+    this.sendBtn = inputArea.createEl("button", {
       cls: "gemmera-send",
       text: "Skicka",
     });
-    sendBtn.addEventListener("click", () => this.handleSend());
+    this.sendBtn.addEventListener("click", () => this.handleSend());
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -70,13 +74,45 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
-  private handleSend(): void {
+  private async handleSend(): Promise<void> {
     const text = this.inputEl.value.trim();
     if (!text) return;
-    this.appendMessage("user", text);
+
     this.inputEl.value = "";
-    // LLM call will be wired in a later issue
-    this.appendMessage("assistant", "(Ollama-integration kommer i nästa steg)");
+    this.setInputDisabled(true);
+
+    this.history.push({ role: "user", content: text });
+    this.appendMessage("user", text);
+
+    const { el: assistantEl, textEl } = this.appendStreamingMessage();
+
+    try {
+      const reply = await chat(this.model, this.history, (token) => {
+        textEl.textContent += token;
+        this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+      });
+      this.history.push({ role: "assistant", content: reply });
+    } catch (err) {
+      textEl.textContent = `Fel: ${err instanceof Error ? err.message : "okänt fel"}`;
+      assistantEl.addClass("gemmera-message--error");
+      this.history.pop();
+    } finally {
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+    }
+  }
+
+  private setInputDisabled(disabled: boolean): void {
+    this.inputEl.disabled = disabled;
+    this.sendBtn.disabled = disabled;
+  }
+
+  private appendStreamingMessage(): { el: HTMLElement; textEl: HTMLElement } {
+    const el = this.messagesEl.createEl("div", { cls: "gemmera-message gemmera-message--assistant" });
+    el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+    const textEl = el.createEl("p", { cls: "gemmera-message__text", text: "" });
+    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+    return { el, textEl };
   }
 
   private appendMessage(role: "user" | "assistant", text: string): void {
@@ -85,4 +121,5 @@ export class GemmeraChatView extends ItemView {
     msg.createEl("p", { cls: "gemmera-message__text", text });
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
   }
+
 }
