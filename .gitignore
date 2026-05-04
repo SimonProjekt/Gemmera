@@ -14,3 +14,5 @@ node_modules/
 
 # Dev
 .hotreload
+.venv/
+__pycache__/
