@@ -6,7 +6,7 @@ Ett Obsidian-plugin som förvandlar din vault till en lokal, privat kunskapsbas 
 
 ## MVP
 
-Ett Obsidian-plugin som lägger till en chattpanel i sidofältet. Gemma kör lokalt via Ollama och har verktyg för att skapa, läsa och uppdatera filer i vaulten.
+Ett Obsidian-plugin som lägger till en chattpanel i sidofältet. Gemma kör lokalt via Ollama med token-för-token strömning och bibehåller konversationshistorik mellan sessioner.
 
 Kärnfunktioner:
 
@@ -15,7 +15,7 @@ Kärnfunktioner:
 - **Uppdatering av befintliga sidor** — Gemma kan läsa och lägga till innehåll i existerande filer, med preview innan ändring skrivs.
 - **Sökning i vaulten** — Gemma kan slå upp innehåll i vaultens filer för att svara med citat till källor.
 
-Fejkpersonen "Jonas Berg" (dagböcker, brev, bokrecensioner) medföljer som demo-vault så allt fungerar direkt efter installation.
+Fejkpersonen "Jonas Berg" (dagböcker, brev och bokrecensioner på svenska) medföljer som demo-vault så allt fungerar direkt efter installation.
 
 ## Säkerhetsprinciper
 
@@ -31,10 +31,17 @@ TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, M
 
 ## Tidsplan — 4 veckor
 
-- **Vecka 1 (grund):** Repo-setup, plugin-skelett, Ollama-integration, enkel chat-panel, persona-generering.
-- **Vecka 2 (full MVP):** Verktyg för filskapande, läsning och uppdatering. Preview-dialog. Tester på Jonas-vaulten.
-- **Vecka 3 (utökning):** Ett av röstinmatning / vault-sökning med citat / inkrementell indexering. Val efter v2-retro.
-- **Vecka 4 (polering):** Utvärdering mot 20 testfrågor, installationsguide, demo-förberedelse.
+### Vecka 1 ✅ (grund)
+- [x] Repo-setup
+- [x] Plugin-skelett
+- [x] Ollama-integration med token-strömning
+- [x] Chat-panel med konversationshistorik
+- [x] Persona-generering (Jonas Berg, svenska anteckningar)
+
+### Vecka 2 (full MVP)
+- [ ] Verktyg för filskapande, läsning och uppdatering
+- [ ] Preview-dialog
+- [ ] Tester på Jonas-vaulten
 
 **Slutacceptans:** en ny person installerar pluginet, följer README, och har en fungerande chatt som kan skapa filer i sin vault inom 20 min på en typisk 8 GB-bärbar.
 
