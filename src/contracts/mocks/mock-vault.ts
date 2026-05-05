@@ -1,8 +1,8 @@
-import type { VaultFileRef, VaultService } from "../vault";
+import type { HeadingRef, VaultFileRef, VaultService } from "../vault";
 
 export class MockVaultService implements VaultService {
   private files = new Map<string, string>();
-  private headings = new Map<string, string[]>();
+  private headings = new Map<string, HeadingRef[]>();
 
   constructor(initial: Record<string, string> = {}) {
     for (const [path, content] of Object.entries(initial)) {
@@ -37,12 +37,15 @@ export class MockVaultService implements VaultService {
     this.files.set(path, existing + content);
   }
 
-  async getHeadings(path: string): Promise<string[]> {
+  async getHeadings(path: string): Promise<HeadingRef[]> {
     return this.headings.get(path) ?? [];
   }
 
-  setHeadings(path: string, headings: string[]): void {
-    this.headings.set(path, headings);
+  setHeadings(path: string, headings: HeadingRef[] | string[]): void {
+    const refs: HeadingRef[] = headings.map((h, i) =>
+      typeof h === "string" ? { level: 2, text: h, offset: i } : h,
+    );
+    this.headings.set(path, refs);
   }
 }
 

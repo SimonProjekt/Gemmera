@@ -31,7 +31,10 @@ export class VaultLinearIndexService implements IndexService {
     for (const file of files) {
       const nameScore =
         terms.filter((t) => file.basename.toLowerCase().includes(t)).length * 2;
-      const headings = (await this.vault.getHeadings(file.path)).join(" ").toLowerCase();
+      const headings = (await this.vault.getHeadings(file.path))
+        .map((h) => h.text)
+        .join(" ")
+        .toLowerCase();
       const headingScore = terms.filter((t) => headings.includes(t)).length;
       const content = await this.vault.read(file.path);
       const lower = content.toLowerCase();

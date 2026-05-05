@@ -1,5 +1,5 @@
 import type { App, TFile } from "obsidian";
-import type { VaultFileRef, VaultService } from "../contracts";
+import type { HeadingRef, VaultFileRef, VaultService } from "../contracts";
 
 export class ObsidianVaultService implements VaultService {
   constructor(private readonly app: App) {}
@@ -31,10 +31,16 @@ export class ObsidianVaultService implements VaultService {
     await this.app.vault.append(file, content);
   }
 
-  async getHeadings(path: string): Promise<string[]> {
+  async getHeadings(path: string): Promise<HeadingRef[]> {
     const file = this.requireFile(path);
     const cache = this.app.metadataCache.getFileCache(file);
-    return cache?.headings?.map((h) => h.heading) ?? [];
+    return (
+      cache?.headings?.map((h) => ({
+        level: h.level,
+        text: h.heading,
+        offset: h.position.start.offset,
+      })) ?? []
+    );
   }
 
   private requireFile(path: string): TFile {
