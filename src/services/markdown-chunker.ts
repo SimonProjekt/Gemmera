@@ -178,7 +178,9 @@ function makeChunk(opts: MakeChunkOpts): Chunk {
     text: opts.text,
     textForEmbed,
     tokenCount: estTokens(opts.text),
-    contentHash: sha256(opts.text),
+    // Hash covers what gets embedded — body + heading prefix — so a heading
+    // rename invalidates the cached vector even when the body is byte-identical.
+    contentHash: sha256(textForEmbed),
   };
 }
 

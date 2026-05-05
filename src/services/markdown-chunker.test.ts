@@ -163,7 +163,7 @@ describe("MarkdownChunker — Jonas vault fixture", () => {
       [1, "bokhylla — projektanteckningar"],
       [2, "Vad det gör"],
       [2, "Kommandon (nuläge)"],
-    ).filter((h, _, all) => all.findIndex((x) => x.offset === h.offset) === all.indexOf(h));
+    );
 
     const out = chunker.chunk({
       path: "demo-vault/raw/projektanteckningar_bokhylla.md",
