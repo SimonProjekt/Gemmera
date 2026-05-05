@@ -1,10 +1,5 @@
 bootstrap-prompt.md
 
-# Rust
-/target
-**/*.rs.bk
-Cargo.lock.bak
-
 # Node / Obsidian plugin
 node_modules/
 dist/
@@ -17,8 +12,6 @@ styles.css.map
 
 # Local index + Obsidian artifacts (when this repo is opened as a vault during dev)
 .coworkmd/
-*.duckdb
-*.duckdb.wal
 
 # Obsidian workspace state (not source)
 .obsidian/workspace.json
