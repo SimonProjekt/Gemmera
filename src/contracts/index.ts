@@ -14,3 +14,4 @@ export * from "./state-machine";
 export * from "./prompts";
 export * from "./constrained-decoder";
 export * from "./hard-stops";
+export * from "./classifier";

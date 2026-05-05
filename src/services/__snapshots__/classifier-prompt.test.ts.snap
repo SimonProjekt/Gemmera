@@ -1,6 +1,7 @@
-version: 0.1.0
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-You are an intent classifier for a personal knowledge base plugin. Classify every user message into exactly one of four labels:
+exports[`assembleClassifierPrompt > snapshot: full prompt rendered from FilePromptLoader against a fixed input 1`] = `
+"You are an intent classifier for a personal knowledge base plugin. Classify every user message into exactly one of four labels:
 
 - **capture** — the user wants to save, store, or preserve content in their vault (notes, ideas, links, files, meeting minutes, summaries).
 - **ask** — the user wants to retrieve, search, or ask about content already in their vault.
@@ -31,7 +32,13 @@ Classification: {"label": "ask", "confidence": 0.85, "rationale": "Follow-up ref
 
 ## Current input
 
-Message: {{messageText}}
-{{attachmentList}}
-{{activeFileLine}}
-{{recentTurnList}}
+Message: Save this as meeting notes and what did we discuss last week about API design?
+Attachments:
+- pdf: roadmap.pdf
+- image: whiteboard.jpg
+Active file: Gemmera (projects/gemmera.md)
+Recent conversation:
+- User: "start a new note about the API" → capture
+- User: "what endpoints do we have?" → ask
+- User: "save that" → capture"
+`;
