@@ -1,5 +1,7 @@
 import {
   ActiveTurn,
+  EventLogEntry,
+  EventLogEntryKind,
   QueuedTurn,
   StateContext,
   StateDefinition,
@@ -84,12 +86,14 @@ export class StateMachine {
     const initial = this.config.initialState;
     this.active = { turnId, currentState: initial };
     this.eventCounts.clear();
-    await this.states.get(initial)!.onEnter?.({
+    const ctx: StateContext = {
       turnId,
       state: initial,
       fromState: null,
       triggeringEvent: null,
-    });
+    };
+    await this.writeLog("enter", ctx);
+    await this.states.get(initial)!.onEnter?.(ctx);
     return this.active;
   }
 
@@ -102,14 +106,18 @@ export class StateMachine {
     const fromDef = this.states.get(fromState)!;
     const toDef = this.states.get(toState)!;
 
-    await fromDef.onExit?.({ turnId, state: fromState, fromState, triggeringEvent });
+    const exitCtx: StateContext = { turnId, state: fromState, fromState, triggeringEvent };
+    await this.writeLog("exit", exitCtx);
+    await fromDef.onExit?.(exitCtx);
 
     this.active!.currentState = toState;
 
-    await toDef.onEnter?.({ turnId, state: toState, fromState, triggeringEvent });
+    const enterCtx: StateContext = { turnId, state: toState, fromState, triggeringEvent };
+    await this.writeLog("enter", enterCtx);
+    await toDef.onEnter?.(enterCtx);
 
     if (toDef.terminal) {
-      await this.runUnwind({ turnId, state: toState, fromState, triggeringEvent });
+      await this.runUnwind(enterCtx);
       this.active = null;
       this.eventCounts.clear();
       const next = this.queue.shift();
@@ -117,6 +125,23 @@ export class StateMachine {
         await this.beginTurn(next.turnId);
       }
     }
+  }
+
+  private async writeLog(
+    kind: EventLogEntryKind,
+    ctx: StateContext,
+  ): Promise<void> {
+    if (!this.config.eventLog) return;
+    const entry: EventLogEntry = {
+      turnId: ctx.turnId,
+      kind,
+      state: ctx.state,
+      fromState: ctx.fromState,
+      timestamp: Date.now(),
+      triggeringEvent: ctx.triggeringEvent,
+    };
+    const final = this.config.redactEvent ? this.config.redactEvent(entry) : entry;
+    await this.config.eventLog.write(final);
   }
 
   private async runUnwind(ctx: StateContext): Promise<void> {

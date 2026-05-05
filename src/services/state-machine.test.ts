@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { StateMachineConfig } from "../contracts/state-machine";
+import {
+  EventLogEntry,
+  StateMachineConfig,
+} from "../contracts/state-machine";
+import { InMemoryEventLog } from "./event-log";
 import { StateMachine } from "./state-machine";
 
 function basicConfig(
@@ -275,5 +279,54 @@ describe("StateMachine", () => {
 
     expect(onEnterCount).toBe(2);
     expect(sideEffectCount).toBe(1);
+  });
+
+  it("writes an enter and exit entry to the event log on each transition", async () => {
+    const log = new InMemoryEventLog();
+    const sm = new StateMachine(basicConfig({ eventLog: log }));
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await sm.dispatch({ kind: "user_action", name: "next" });
+
+    const entries = await log.eventsFor("turn-1");
+    expect(entries.map((e) => `${e.kind}:${e.state}`)).toEqual([
+      "enter:A",
+      "exit:A",
+      "enter:B",
+      "exit:B",
+      "enter:DONE",
+    ]);
+    expect(entries[0].triggeringEvent).toBeNull();
+    expect(entries[1].triggeringEvent).toEqual({
+      kind: "user_action",
+      name: "next",
+    });
+    expect(entries[0].timestamp).toBeTypeOf("number");
+  });
+
+  it("passes each entry through redactEvent before writing", async () => {
+    const log = new InMemoryEventLog();
+    const sm = new StateMachine(
+      basicConfig({
+        eventLog: log,
+        redactEvent: (e: EventLogEntry) => ({
+          ...e,
+          triggeringEvent: e.triggeringEvent && {
+            ...e.triggeringEvent,
+            payload: "[REDACTED]",
+          },
+        }),
+      }),
+    );
+    await sm.startTurn("turn-1");
+    await sm.dispatch({
+      kind: "user_action",
+      name: "next",
+      payload: { secret: "hunter2" },
+    });
+
+    const entries = await log.eventsFor("turn-1");
+    const exitA = entries.find((e) => e.kind === "exit" && e.state === "A");
+    expect(exitA?.triggeringEvent?.payload).toBe("[REDACTED]");
   });
 });

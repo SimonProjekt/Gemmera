@@ -37,6 +37,10 @@ export interface StateMachineConfig {
   initialState: string;
   errorBoundedEventsState: string;
   unwind?: UnwindHooks;
+  eventLog?: EventLog;
+  // Sensitive-content redaction at the writer boundary. If provided, each
+  // entry is passed through this function before being written.
+  redactEvent?: (entry: EventLogEntry) => EventLogEntry;
 }
 
 // Canonical terminal state names per planning/tool-loop.md.
@@ -69,4 +73,24 @@ export interface ActiveTurn {
 
 export interface QueuedTurn {
   turnId: string;
+}
+
+export type EventLogEntryKind = "enter" | "exit";
+
+// One row written for every state enter and exit. Payload covers the
+// triggering event (kind, name, and any tool args / results / model
+// output the consumer attaches as `payload`). Used by the turn inspector
+// and as the input to deterministic replay.
+export interface EventLogEntry {
+  turnId: string;
+  kind: EventLogEntryKind;
+  state: string;
+  fromState: string | null;
+  timestamp: number;
+  triggeringEvent: StateMachineEvent | null;
+}
+
+export interface EventLog {
+  write(entry: EventLogEntry): void | Promise<void>;
+  eventsFor(turnId: string): Promise<readonly EventLogEntry[]>;
 }
