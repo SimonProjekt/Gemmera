@@ -68,6 +68,16 @@ export class JsonIngestionStore implements IngestionStore {
     return Object.keys(data.notes);
   }
 
+  async isHashReferenced(contentHash: string): Promise<boolean> {
+    const data = await this.load();
+    for (const chunks of Object.values(data.chunks)) {
+      for (const c of chunks) {
+        if (c.contentHash === contentHash) return true;
+      }
+    }
+    return false;
+  }
+
   private async load(): Promise<StoreShape> {
     if (this.cache) return this.cache;
     try {

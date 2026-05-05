@@ -39,6 +39,12 @@ export interface IngestionStore {
   rename(from: string, to: string): Promise<void>;
   /** Enumerate all known note paths. Used by the reconciler to find orphans. */
   list(): Promise<string[]>;
+  /**
+   * True if any stored chunk in any path has the given contentHash. Used by
+   * the embedding service to decide whether an orphaned chunkHash can have
+   * its vector evicted, or whether another note still references it.
+   */
+  isHashReferenced(contentHash: string): Promise<boolean>;
 }
 
 export interface IngestionPipeline {

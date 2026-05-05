@@ -1,9 +1,10 @@
-import type { Chunk, Embedder, VectorStore } from "../contracts";
-import type { IngestionRunner, RunnerEvent } from "./ingestion-runner";
+import type { Chunk, Embedder, IngestionStore, VectorStore } from "../contracts";
+import type { IngestionRunner } from "./ingestion-runner";
 
 export type EmbeddingEvent =
   | { kind: "embedded"; path: string; count: number }
   | { kind: "skipped"; path: string; count: number }
+  | { kind: "evicted"; path: string; count: number }
   | { kind: "error"; path: string | null; error: unknown };
 
 /**
@@ -28,6 +29,7 @@ export class EmbeddingService {
     private readonly runner: Pick<IngestionRunner, "onResult">,
     private readonly embedder: Embedder,
     private readonly store: VectorStore,
+    private readonly ingestionStore: IngestionStore,
   ) {}
 
   start(): void {
@@ -35,7 +37,7 @@ export class EmbeddingService {
     this.unsubscribe = this.runner.onResult((event) => {
       if (event.kind !== "decision") return;
       if (event.decision.kind !== "rechunk") return;
-      this.schedule(event.decision.chunks);
+      this.schedule(event.decision.chunks, event.decision.priorChunks);
     });
   }
 
@@ -61,16 +63,20 @@ export class EmbeddingService {
     return this.inFlight;
   }
 
-  private schedule(chunks: Chunk[]): void {
-    if (chunks.length === 0) return;
-    const next = this.inFlight.then(() => this.process(chunks));
+  private schedule(chunks: Chunk[], priorChunks: Chunk[]): void {
+    if (chunks.length === 0 && priorChunks.length === 0) return;
+    const next = this.inFlight.then(() => this.process(chunks, priorChunks));
     this.inFlight = next.catch(() => undefined);
   }
 
-  private async process(chunks: Chunk[]): Promise<void> {
+  private async process(chunks: Chunk[], priorChunks: Chunk[]): Promise<void> {
     this.running = true;
-    const path = chunks[0]?.path ?? "";
+    const path = chunks[0]?.path ?? priorChunks[0]?.path ?? "";
     try {
+      await this.evictOrphans(path, chunks, priorChunks);
+
+      if (chunks.length === 0) return;
+
       // Dedupe by contentHash within the batch (same content can repeat).
       const byHash = new Map<string, Chunk>();
       for (const c of chunks) byHash.set(c.contentHash, c);
@@ -100,6 +106,21 @@ export class EmbeddingService {
     } finally {
       this.running = false;
     }
+  }
+
+  private async evictOrphans(path: string, chunks: Chunk[], priorChunks: Chunk[]): Promise<void> {
+    if (priorChunks.length === 0) return;
+    const live = new Set(chunks.map((c) => c.contentHash));
+    let evicted = 0;
+    for (const prior of priorChunks) {
+      if (live.has(prior.contentHash)) continue;
+      // Another note may still reference this content. The IngestionStore is
+      // post-ingest by the time we run, so its current state is authoritative.
+      if (await this.ingestionStore.isHashReferenced(prior.contentHash)) continue;
+      await this.store.delete(prior.contentHash);
+      evicted++;
+    }
+    if (evicted > 0) this.emit({ kind: "evicted", path, count: evicted });
   }
 
   private emit(event: EmbeddingEvent): void {

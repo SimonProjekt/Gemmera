@@ -40,4 +40,13 @@ export class InMemoryIngestionStore implements IngestionStore {
   async list(): Promise<string[]> {
     return [...this.notes.keys()];
   }
+
+  async isHashReferenced(contentHash: string): Promise<boolean> {
+    for (const chunks of this.chunks.values()) {
+      for (const c of chunks) {
+        if (c.contentHash === contentHash) return true;
+      }
+    }
+    return false;
+  }
 }
