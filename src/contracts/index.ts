@@ -7,3 +7,4 @@ export * from "./jobs";
 export * from "./vault-events";
 export * from "./vector-store";
 export * from "./embedder";
+export * from "./state-machine";
