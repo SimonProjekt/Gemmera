@@ -10,10 +10,31 @@ node_modules/
 dist/
 *.log
 
+# Plugin build output
+main.js
+main.js.map
+styles.css.map
+
 # Local index + Obsidian artifacts (when this repo is opened as a vault during dev)
 .coworkmd/
 *.duckdb
 *.duckdb.wal
+
+# Obsidian workspace state (not source)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Obsidian vault runtime state
+demo-vault/raw/.obsidian/workspace.json
+demo-vault/raw/.obsidian/workspace-mobile.json
+demo-vault/raw/.obsidian/appearance.json
+demo-vault/raw/.obsidian/graph.json
+demo-vault/raw/.obsidian/plugins/
+
+# Dev
+.hotreload
+.venv/
+__pycache__/
 
 # Editor / OS
 .DS_Store
