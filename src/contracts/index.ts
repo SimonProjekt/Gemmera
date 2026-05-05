@@ -10,4 +10,3 @@ export * from "./embedder";
 export * from "./links-index";
 export * from "./retrieval";
 export * from "./bm25-index";
-export * from "./ingest-tool-loop";
