@@ -1,9 +1,14 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
+import { createServices, Services } from "./services";
 
 export default class GemmeraPlugin extends Plugin {
+  private services!: Services;
+
   async onload(): Promise<void> {
-    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf));
+    this.services = createServices(this.app);
+
+    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services));
 
     this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();
