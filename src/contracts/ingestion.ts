@@ -11,7 +11,13 @@ export interface NoteState {
 export type IngestDecision =
   | { kind: "skip"; state: NoteState }
   | { kind: "metadata-only"; state: NoteState }
-  | { kind: "rechunk"; state: NoteState; chunks: Chunk[] };
+  /**
+   * Body changed: emit the new chunks plus the prior set so downstream
+   * consumers (notably the embedder) can compute a contentHash diff and
+   * evict orphaned vectors without re-querying the store. `priorChunks`
+   * is `[]` for a first-time ingest.
+   */
+  | { kind: "rechunk"; state: NoteState; chunks: Chunk[]; priorChunks: Chunk[] };
 
 export interface IngestOptions {
   mtime?: number;

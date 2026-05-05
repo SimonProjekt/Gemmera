@@ -85,6 +85,17 @@ describe("HashGatedIngestionPipeline", () => {
     expect(second.kind).toBe("rechunk");
     if (first.kind !== "rechunk" || second.kind !== "rechunk") return;
     expect(second.state.bodyHash).not.toBe(first.state.bodyHash);
+    // Prior chunks captured before upsert overwrites — embedder uses these
+    // to evict orphaned vectors.
+    expect(second.priorChunks).toEqual(first.chunks);
+  });
+
+  it("reports an empty priorChunks list on first ingest", async () => {
+    const { pipeline } = setup({ "Notes/a.md": body("# Title", "", "Body.") });
+    const decision = await pipeline.ingest("Notes/a.md");
+    expect(decision.kind).toBe("rechunk");
+    if (decision.kind !== "rechunk") return;
+    expect(decision.priorChunks).toEqual([]);
   });
 
   it("persists provided mtime", async () => {

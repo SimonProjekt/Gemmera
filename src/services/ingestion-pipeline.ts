@@ -46,8 +46,12 @@ export class HashGatedIngestionPipeline implements IngestionPipeline {
     const headings = await this.vault.getHeadings(path);
     const chunks = this.chunker.chunk({ path, title, content: raw, headings });
 
+    // Capture priors before upsert overwrites them — the embedder needs
+    // them to evict vectors for contentHashes that no longer appear.
+    const priorChunks = prior ? await this.store.getChunks(path) : [];
+
     await this.store.upsert(state, chunks);
-    return { kind: "rechunk", state, chunks };
+    return { kind: "rechunk", state, chunks, priorChunks };
   }
 }
 

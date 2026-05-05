@@ -4,7 +4,6 @@ import type {
   IngestionPipeline,
   IngestionStore,
   JobQueue,
-  JobRunner,
   LLMService,
   PathFilter,
   Reconciler,
@@ -21,7 +20,7 @@ import { VaultEventBridge } from "./vault-event-bridge";
 import { JsonIngestionStore } from "./json-ingestion-store";
 import { HashGatedIngestionPipeline } from "./ingestion-pipeline";
 import { MarkdownChunker } from "./markdown-chunker";
-import { IndexJobRunner } from "./job-runner";
+import { IngestionRunner } from "./ingestion-runner";
 import { VaultReconciler } from "./vault-reconciler";
 import { BinaryVectorStore } from "./binary-vector-store";
 
@@ -34,7 +33,7 @@ export interface Services {
   eventBridge: VaultEventBridge;
   ingestionStore: IngestionStore;
   ingestionPipeline: IngestionPipeline;
-  jobRunner: JobRunner;
+  ingestionRunner: IngestionRunner;
   reconciler: Reconciler;
   vectorStore: VectorStore;
 }
@@ -67,7 +66,7 @@ export function createServices(app: App): Services {
     new MarkdownChunker(),
     ingestionStore,
   );
-  const jobRunner = new IndexJobRunner(jobQueue, ingestionPipeline, ingestionStore);
+  const ingestionRunner = new IngestionRunner(jobQueue, ingestionPipeline, ingestionStore);
   const reconciler = new VaultReconciler(vault, ingestionStore, jobQueue, pathFilter);
   const vectorStore = new BinaryVectorStore(
     adapter.getFullPath(VECTORS_BIN_PATH),
@@ -85,7 +84,7 @@ export function createServices(app: App): Services {
     eventBridge,
     ingestionStore,
     ingestionPipeline,
-    jobRunner,
+    ingestionRunner,
     reconciler,
     vectorStore,
   };
@@ -101,6 +100,6 @@ export { VaultEventBridge } from "./vault-event-bridge";
 export { JsonIngestionStore } from "./json-ingestion-store";
 export { HashGatedIngestionPipeline } from "./ingestion-pipeline";
 export { MarkdownChunker } from "./markdown-chunker";
-export { IndexJobRunner } from "./job-runner";
+export { IngestionRunner } from "./ingestion-runner";
 export { VaultReconciler } from "./vault-reconciler";
 export { BinaryVectorStore } from "./binary-vector-store";

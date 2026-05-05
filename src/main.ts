@@ -8,7 +8,7 @@ export default class GemmeraPlugin extends Plugin {
   async onload(): Promise<void> {
     this.services = createServices(this.app);
     this.services.eventBridge.start();
-    this.services.jobRunner.start();
+    this.services.ingestionRunner.start();
     // Fire reconcile in the background — hash gate keeps it cheap on warm reloads.
     this.services.reconciler
       .reconcile()
@@ -28,8 +28,8 @@ export default class GemmeraPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
-    this.services?.jobRunner.stop();
     this.services?.eventBridge.stop();
+    if (this.services) await this.services.ingestionRunner.stop();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
 
