@@ -20,3 +20,21 @@ export interface PathFilter {
 export interface UserIgnoreMatcher {
   matches(path: string): boolean;
 }
+
+/**
+ * Cold-start reconciliation. Vault events only cover changes while the plugin
+ * is running; on load, files may have been added, deleted, or edited
+ * externally. The runner calls `reconcile()` once after subscribing to events:
+ *
+ *   1. List vault files; enqueue an `index` job for each. The hash gate in
+ *      the ingestion pipeline (#5) makes warm reloads a near no-op — only
+ *      changed files actually re-chunk.
+ *   2. Find store entries whose path is no longer in the vault; enqueue a
+ *      `delete` job for each.
+ *
+ * Live event subscription (#4) and reconcile (this) together cover every
+ * vault state transition. Numbers returned are for telemetry / status bar.
+ */
+export interface Reconciler {
+  reconcile(): Promise<{ enqueuedIndex: number; enqueuedDelete: number }>;
+}
