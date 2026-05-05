@@ -21,5 +21,9 @@ export interface ConstrainedDecoder {
   decode(opts: {
     stateName: string;
     prompt: string;
+    // Optional cancellation signal forwarded to the underlying LLM call,
+    // typically StateContext.signal so terminal transitions release in-
+    // flight model streams.
+    signal?: AbortSignal;
   }): Promise<ConstrainedDecodeResult>;
 }

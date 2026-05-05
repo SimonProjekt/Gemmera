@@ -122,6 +122,34 @@ describe("JsonConstrainedDecoder", () => {
   });
 });
 
+describe("AbortSignal forwarding", () => {
+  it("forwards opts.signal to the underlying LLM chat call", async () => {
+    const seen: ChatOptions[] = [];
+    class CapturingLLM implements LLMService {
+      async chat(opts: ChatOptions): Promise<LLMResponse> {
+        seen.push(opts);
+        return { content: "{}" };
+      }
+      async isReachable(): Promise<LLMReachability> {
+        return "running";
+      }
+      async listModels(): Promise<string[]> {
+        return [];
+      }
+      async pickDefaultModel(): Promise<string> {
+        return "test";
+      }
+    }
+    const decoder = new JsonConstrainedDecoder(
+      new CapturingLLM(),
+      new InMemorySchemaRegistry(),
+    );
+    const ctrl = new AbortController();
+    await decoder.decode({ stateName: "X", prompt: "p", signal: ctrl.signal });
+    expect(seen[0].signal).toBe(ctrl.signal);
+  });
+});
+
 describe("benchmarkDecoder", () => {
   it("reports parseFailures, schemaFailures, and successRate across fixtures", async () => {
     const registry = new InMemorySchemaRegistry();

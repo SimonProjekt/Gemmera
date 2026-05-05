@@ -17,6 +17,10 @@ export interface StateContext {
   state: string;
   fromState: string | null;
   triggeringEvent: StateMachineEvent | null;
+  // Aborts when the turn enters a terminal state (cancel, timeout, error).
+  // onEnter/onExit handlers should forward this to LLM/tool calls so they
+  // release promptly when the turn ends.
+  signal: AbortSignal;
 }
 
 export interface StateDefinition {

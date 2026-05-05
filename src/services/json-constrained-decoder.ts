@@ -30,6 +30,7 @@ export class JsonConstrainedDecoder implements ConstrainedDecoder {
   async decode(opts: {
     stateName: string;
     prompt: string;
+    signal?: AbortSignal;
   }): Promise<ConstrainedDecodeResult> {
     const schema = this.registry.get(opts.stateName);
     const response = await this.llm.chat({
@@ -37,6 +38,7 @@ export class JsonConstrainedDecoder implements ConstrainedDecoder {
         { role: "system", content: composeSystemPrompt(schema) },
         { role: "user", content: opts.prompt },
       ],
+      signal: opts.signal,
     });
     const raw = response.content;
 

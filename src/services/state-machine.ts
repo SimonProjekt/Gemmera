@@ -20,6 +20,7 @@ export class StateMachine {
   private counterValues = new Map<string, number>();
   private retryCounts = new Map<string, number>();
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
+  private abortController = new AbortController();
 
   constructor(private config: StateMachineConfig) {
     for (const s of config.states) {
@@ -140,6 +141,7 @@ export class StateMachine {
       state: this.active.currentState,
       fromState: this.active.currentState,
       triggeringEvent: { kind: "limit", name, payload: { value: next } },
+      signal: this.abortController.signal,
     });
     if (next > limit.limit) {
       await this.transitionTo(limit.terminalState, {
@@ -167,6 +169,9 @@ export class StateMachine {
     if (!this.states.has(terminalState)) {
       throw new Error(`Cancel terminal state not defined: ${terminalState}`);
     }
+    // Abort first so any in-flight LLM/tool work in onEnter/onExit
+    // releases before the transition cascade runs.
+    this.abortController.abort();
     await this.transitionTo(terminalState, {
       kind: "user_action",
       name: "cancel",
@@ -217,11 +222,13 @@ export class StateMachine {
     this.eventCounts.clear();
     this.counterValues.clear();
     this.retryCounts.clear();
+    this.abortController = new AbortController();
     const ctx: StateContext = {
       turnId,
       state: initial,
       fromState: null,
       triggeringEvent: null,
+      signal: this.abortController.signal,
     };
     await this.writeLog("enter", ctx);
     await this.states.get(initial)!.onEnter?.(ctx);
@@ -241,6 +248,7 @@ export class StateMachine {
     // longer hook chains; serializing transitions via a lock is the
     // principled fix once concurrent driving becomes a real scenario.
     if (!this.active) return;
+    this.abortController.abort();
     await this.transitionTo(terminalState, {
       kind: "timer",
       name: "turn_timeout",
@@ -256,13 +264,26 @@ export class StateMachine {
     const fromDef = this.states.get(fromState)!;
     const toDef = this.states.get(toState)!;
 
-    const exitCtx: StateContext = { turnId, state: fromState, fromState, triggeringEvent };
+    const signal = this.abortController.signal;
+    const exitCtx: StateContext = {
+      turnId,
+      state: fromState,
+      fromState,
+      triggeringEvent,
+      signal,
+    };
     await this.writeLog("exit", exitCtx);
     await fromDef.onExit?.(exitCtx);
 
     this.active!.currentState = toState;
 
-    const enterCtx: StateContext = { turnId, state: toState, fromState, triggeringEvent };
+    const enterCtx: StateContext = {
+      turnId,
+      state: toState,
+      fromState,
+      triggeringEvent,
+      signal,
+    };
     await this.writeLog("enter", enterCtx);
     await toDef.onEnter?.(enterCtx);
 
@@ -305,6 +326,10 @@ export class StateMachine {
   }
 
   private async runUnwind(ctx: StateContext): Promise<void> {
+    // Abort first so any in-flight LLM/tool calls release before the
+    // ordered unwind runs. Idempotent — cancel/timeout may have already
+    // aborted before reaching here.
+    this.abortController.abort();
     const u = this.config.unwind;
     if (!u) return;
     // Best-effort: each hook is isolated so one failure does not strand

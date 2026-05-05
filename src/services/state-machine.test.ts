@@ -42,6 +42,7 @@ describe("StateMachine", () => {
       state: "A",
       fromState: null,
       triggeringEvent: null,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -135,12 +136,14 @@ describe("StateMachine", () => {
       state: "A",
       fromState: "A",
       triggeringEvent: event,
+      signal: expect.any(AbortSignal),
     });
     expect(onEnterB).toHaveBeenCalledWith({
       turnId: "turn-1",
       state: "B",
       fromState: "A",
       triggeringEvent: event,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -684,6 +687,30 @@ describe("StateMachine", () => {
     ]);
     expect(sm.getActive()).toBeNull();
     consoleSpy.mockRestore();
+  });
+
+  it("aborts the per-turn signal when the turn enters a terminal state", async () => {
+    let captured: AbortSignal | undefined;
+    const config = basicConfig({
+      states: [
+        {
+          name: "A",
+          maxEventsPerTurn: 5,
+          onEnter: (ctx) => {
+            captured = ctx.signal;
+          },
+        },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "CANCELLED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    expect(captured?.aborted).toBe(false);
+    await sm.cancel();
+    expect(captured?.aborted).toBe(true);
   });
 
   it("bounded-events terminal entry carries a synthetic limit event", async () => {
