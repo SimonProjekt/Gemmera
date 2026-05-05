@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "retrieval-reasoner",
+  "description": "Placeholder schema. Concrete fields land alongside the prompt body.",
+  "type": "object",
+  "additionalProperties": true
+}
