@@ -1,43 +1,35 @@
-import { promises as fs } from "fs";
-import { join } from "path";
 import { ClassifierInput } from "../contracts/classifier";
-
-/** Canonical version ID for intent-classifier prompt. Stamped into every
- *  `classifier_decision` event row so eval regressions trace to the
- *  exact prompt revision. Must match the `version:` header in
- *  `prompts/intent-classifier.md`. */
-export const INTENT_CLASSIFIER_PROMPT_VERSION = "0.1.0";
 
 /**
  * Assemble the full classifier prompt by rendering a template body with
- * values from `input`. The `body` parameter is the raw prompt file
- * content (system instructions + few-shot examples + placeholders) as
- * loaded by the FilePromptLoader or from disk.
+ * values from `input`. The `body` parameter is the prompt body returned
+ * by `FilePromptLoader.load("intent-classifier")` (header stripped, body
+ * trimmed). The resolved `version` from the same `LoadedPrompt` is what
+ * gets stamped into `classifier_decision` rows.
  *
  * Placeholders:
  *   {{messageText}}     — the (possibly truncated) user message
  *   {{attachmentList}}  — bullet list of attachments, or empty line
  *   {{activeFileLine}}  — "Active file: title (filename)", or empty line
  *   {{recentTurnList}}  — numbered recent turns, or empty line
+ *
+ * Substitution uses a function-form replace so user input containing
+ * `$&`, `$1`, etc. is not interpreted as a regex backreference.
  */
 export function assembleClassifierPrompt(
   input: ClassifierInput,
   body: string,
 ): string {
-  return body
-    .replace("{{messageText}}", input.messageText)
-    .replace("{{attachmentList}}", renderAttachmentList(input))
-    .replace("{{activeFileLine}}", renderActiveFile(input))
-    .replace("{{recentTurnList}}", renderRecentTurns(input));
-}
-
-/** Load the prompt file from the `prompts/` directory next to the
- *  project root. Returns the raw file content including the version
- *  header line. */
-export async function loadClassifierPromptBody(): Promise<string> {
-  return fs.readFile(
-    join(process.cwd(), "prompts", "intent-classifier.md"),
-    "utf-8",
+  const substitutions: Record<string, string> = {
+    messageText: input.messageText,
+    attachmentList: renderAttachmentList(input),
+    activeFileLine: renderActiveFile(input),
+    recentTurnList: renderRecentTurns(input),
+  };
+  return body.replace(/\{\{(\w+)\}\}/g, (match, key: string) =>
+    Object.prototype.hasOwnProperty.call(substitutions, key)
+      ? substitutions[key]
+      : match,
   );
 }
 

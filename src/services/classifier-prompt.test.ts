@@ -1,10 +1,10 @@
+import { join } from "path";
 import { describe, expect, it } from "vitest";
 import { ClassifierInput } from "../contracts/classifier";
-import {
-  assembleClassifierPrompt,
-  INTENT_CLASSIFIER_PROMPT_VERSION,
-  loadClassifierPromptBody,
-} from "./classifier-prompt";
+import { FilePromptLoader } from "./file-prompt-loader";
+import { assembleClassifierPrompt } from "./classifier-prompt";
+
+const promptsDir = join(process.cwd(), "prompts");
 
 const fixedInput: ClassifierInput = {
   messageText: "Save this as meeting notes and what did we discuss last week about API design?",
@@ -21,18 +21,9 @@ const fixedInput: ClassifierInput = {
   ],
 };
 
-describe("INTENT_CLASSIFIER_PROMPT_VERSION", () => {
-  it("matches the version header in the prompt file", async () => {
-    const body = await loadClassifierPromptBody();
-    expect(body).toContain(`version: ${INTENT_CLASSIFIER_PROMPT_VERSION}`);
-  });
-});
-
 describe("assembleClassifierPrompt", () => {
   it("renders all sections when the input is fully populated", () => {
     const body = [
-      "version: 0.1.0",
-      "",
       "System preamble",
       "",
       "## Current input",
@@ -100,9 +91,28 @@ describe("assembleClassifierPrompt", () => {
     expect(result.match(/→/g)).toHaveLength(4);
   });
 
-  it("snapshot: full prompt rendered from the on-disk file against a fixed input", async () => {
-    const body = await loadClassifierPromptBody();
-    const result = assembleClassifierPrompt(fixedInput, body);
+  it("does not interpret regex replacement patterns in user input", () => {
+    // String.prototype.replace with a string second argument expands $&, $1
+    // etc. into match references. The function-form replace must guard
+    // against this so user input is rendered verbatim.
+    const adversarial = '$& and $1 and $`';
+    const result = assembleClassifierPrompt(
+      { ...fixedInput, messageText: adversarial },
+      "Message: {{messageText}}",
+    );
+    expect(result).toBe(`Message: ${adversarial}`);
+  });
+
+  it("snapshot: full prompt rendered from FilePromptLoader against a fixed input", async () => {
+    const loader = new FilePromptLoader(promptsDir);
+    const loaded = await loader.load("intent-classifier");
+    const result = assembleClassifierPrompt(fixedInput, loaded.body);
     expect(result).toMatchSnapshot();
+  });
+
+  it("the loaded prompt's version is the source of truth for stamping", async () => {
+    const loader = new FilePromptLoader(promptsDir);
+    const loaded = await loader.load("intent-classifier");
+    expect(loaded.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });

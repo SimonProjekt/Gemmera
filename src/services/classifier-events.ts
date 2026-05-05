@@ -2,6 +2,10 @@ import {
   ClassifierDecisionRow,
   ClassifierDisambiguationRow,
   ClassifierEventWriter,
+  ClassifierInput,
+  ClassifierOutput,
+  ClassifierSource,
+  IntentLabel,
 } from "../contracts/classifier";
 
 // ─── DuckDB DDL ───────────────────────────────────────────────────────
@@ -11,7 +15,7 @@ import {
 export const CLASSIFIER_DECISION_DDL = [
   "CREATE TABLE IF NOT EXISTS classifier_decision (",
   "  turn_id      TEXT NOT NULL,",
-  "  ts           INTEGER NOT NULL,",
+  "  ts           BIGINT NOT NULL,",
   "  source       TEXT NOT NULL,",
   "  skip_reason  TEXT,",
   "  prompt_version TEXT NOT NULL,",
@@ -27,11 +31,11 @@ export const CLASSIFIER_DECISION_DDL = [
 export const CLASSIFIER_DISAMBIGUATION_DDL = [
   "CREATE TABLE IF NOT EXISTS classifier_disambiguation (",
   "  turn_id            TEXT NOT NULL,",
-  "  ts                 INTEGER NOT NULL,",
+  "  ts                 BIGINT NOT NULL,",
   "  original_label     TEXT NOT NULL,",
   "  original_confidence REAL NOT NULL,",
   "  chosen_label       TEXT,",
-  "  cancelled          INTEGER NOT NULL DEFAULT 0",
+  "  cancelled          BOOLEAN NOT NULL DEFAULT FALSE",
   ");",
 ].join("\n");
 
@@ -77,27 +81,27 @@ export class InMemoryClassifierEventWriter implements ClassifierEventWriter {
 export function toDecisionRow(
   turnId: string,
   decision: {
-    source: string;
+    source: ClassifierSource;
     skipReason: string | null;
     promptVersion: string;
     latencyMs: number;
-    input: object;
-    output: object | null;
+    input: ClassifierInput;
+    output: ClassifierOutput | null;
     confidence: number | null;
-    label: string | null;
+    label: IntentLabel | null;
   },
 ): ClassifierDecisionRow {
   return {
     turn_id: turnId,
     ts: Date.now(),
-    source: decision.source as ClassifierDecisionRow["source"],
+    source: decision.source,
     skip_reason: decision.skipReason,
     prompt_version: decision.promptVersion,
     input_json: JSON.stringify(decision.input),
     output_json: decision.output ? JSON.stringify(decision.output) : null,
     latency_ms: decision.latencyMs,
     confidence: decision.confidence,
-    label: decision.label as ClassifierDecisionRow["label"],
+    label: decision.label,
   };
 }
 
@@ -107,18 +111,18 @@ export function toDecisionRow(
 export function toDisambiguationRow(
   turnId: string,
   event: {
-    originalLabel: string;
+    originalLabel: IntentLabel;
     originalConfidence: number;
-    chosenLabel: string | null;
+    chosenLabel: IntentLabel | null;
     cancelled: boolean;
   },
 ): ClassifierDisambiguationRow {
   return {
     turn_id: turnId,
     ts: Date.now(),
-    original_label: event.originalLabel as ClassifierDisambiguationRow["original_label"],
+    original_label: event.originalLabel,
     original_confidence: event.originalConfidence,
-    chosen_label: event.chosenLabel as ClassifierDisambiguationRow["chosen_label"],
+    chosen_label: event.chosenLabel,
     cancelled: event.cancelled,
   };
 }
