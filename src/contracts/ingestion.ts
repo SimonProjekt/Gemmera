@@ -45,6 +45,13 @@ export interface IngestionStore {
    * its vector evicted, or whether another note still references it.
    */
   isHashReferenced(contentHash: string): Promise<boolean>;
+  /**
+   * Return every chunk currently stored under the given contentHash. A hash
+   * may be referenced from more than one path when notes share identical
+   * chunk content; all matching `(path, ord)` rows are returned. Used by
+   * the retriever to hydrate `RetrievalHit` rows from a hash-keyed search.
+   */
+  getChunksByHash(contentHash: string): Promise<Chunk[]>;
 }
 
 export interface IngestionPipeline {

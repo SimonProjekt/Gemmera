@@ -1,12 +1,15 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
+import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
 
 export default class GemmeraPlugin extends Plugin {
   private services!: Services;
+  settings!: GemmeraSettings;
 
   async onload(): Promise<void> {
-    this.services = createServices(this.app);
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.services = await createServices(this.app, this.settings);
     this.services.eventBridge.start();
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();
