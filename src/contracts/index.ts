@@ -2,3 +2,6 @@ export * from "./llm";
 export * from "./vault";
 export * from "./index-service";
 export * from "./chunker";
+export * from "./ingestion";
+export * from "./jobs";
+export * from "./vault-events";
