@@ -8,3 +8,4 @@ export * from "./vault-events";
 export * from "./vector-store";
 export * from "./embedder";
 export * from "./links-index";
+export * from "./retrieval";
