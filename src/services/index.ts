@@ -9,6 +9,7 @@ import type {
   PathFilter,
   Reconciler,
   VaultService,
+  VectorStore,
 } from "../contracts";
 import { OllamaLLMService } from "./ollama-llm";
 import { ObsidianVaultService } from "./real-vault";
@@ -22,6 +23,7 @@ import { HashGatedIngestionPipeline } from "./ingestion-pipeline";
 import { MarkdownChunker } from "./markdown-chunker";
 import { IndexJobRunner } from "./job-runner";
 import { VaultReconciler } from "./vault-reconciler";
+import { BinaryVectorStore } from "./binary-vector-store";
 
 export interface Services {
   llm: LLMService;
@@ -34,9 +36,14 @@ export interface Services {
   ingestionPipeline: IngestionPipeline;
   jobRunner: JobRunner;
   reconciler: Reconciler;
+  vectorStore: VectorStore;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
+const VECTORS_BIN_PATH = ".coworkmd/vectors.bin";
+const VECTORS_JSON_PATH = ".coworkmd/vectors.json";
+const DEFAULT_EMBED_MODEL = "bge-m3";
+const DEFAULT_EMBED_DIM = 1024;
 
 export function createServices(app: App): Services {
   const vault = new ObsidianVaultService(app);
@@ -62,6 +69,12 @@ export function createServices(app: App): Services {
   );
   const jobRunner = new IndexJobRunner(jobQueue, ingestionPipeline, ingestionStore);
   const reconciler = new VaultReconciler(vault, ingestionStore, jobQueue, pathFilter);
+  const vectorStore = new BinaryVectorStore(
+    adapter.getFullPath(VECTORS_BIN_PATH),
+    adapter.getFullPath(VECTORS_JSON_PATH),
+    DEFAULT_EMBED_MODEL,
+    DEFAULT_EMBED_DIM,
+  );
 
   return {
     llm: new OllamaLLMService(),
@@ -74,6 +87,7 @@ export function createServices(app: App): Services {
     ingestionPipeline,
     jobRunner,
     reconciler,
+    vectorStore,
   };
 }
 
@@ -89,3 +103,4 @@ export { HashGatedIngestionPipeline } from "./ingestion-pipeline";
 export { MarkdownChunker } from "./markdown-chunker";
 export { IndexJobRunner } from "./job-runner";
 export { VaultReconciler } from "./vault-reconciler";
+export { BinaryVectorStore } from "./binary-vector-store";

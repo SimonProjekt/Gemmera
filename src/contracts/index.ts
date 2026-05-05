@@ -5,3 +5,4 @@ export * from "./chunker";
 export * from "./ingestion";
 export * from "./jobs";
 export * from "./vault-events";
+export * from "./vector-store";
