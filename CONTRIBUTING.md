@@ -68,10 +68,10 @@ This catches conflicts on your branch instead of mixing them into the PR.
 ### 4. Open the PR
 
 ```bash
-gh pr create --base dev --title "feat(area): short title" --body "..."
+gh pr create --title "feat(area): short title" --body "..."
 ```
 
-**Note:** `--base dev` is critical. GitHub's default is `main`, so don't forget this flag.
+The repo's default branch is `dev`, so PRs target `dev` automatically. Pass `--base dev` explicitly if you want to be defensive, or `--base main` only when preparing a release PR from `dev` to `main`.
 
 ## Commit messages — Conventional Commits
 
