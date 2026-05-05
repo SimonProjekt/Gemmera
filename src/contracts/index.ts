@@ -7,3 +7,6 @@ export * from "./jobs";
 export * from "./vault-events";
 export * from "./vector-store";
 export * from "./embedder";
+export * from "./links-index";
+export * from "./retrieval";
+export * from "./bm25-index";

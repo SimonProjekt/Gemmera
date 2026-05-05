@@ -78,6 +78,17 @@ export class JsonIngestionStore implements IngestionStore {
     return false;
   }
 
+  async getChunksByHash(contentHash: string): Promise<Chunk[]> {
+    const data = await this.load();
+    const out: Chunk[] = [];
+    for (const chunks of Object.values(data.chunks)) {
+      for (const c of chunks) {
+        if (c.contentHash === contentHash) out.push(c);
+      }
+    }
+    return out;
+  }
+
   private async load(): Promise<StoreShape> {
     if (this.cache) return this.cache;
     try {

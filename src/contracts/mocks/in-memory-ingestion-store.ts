@@ -49,4 +49,14 @@ export class InMemoryIngestionStore implements IngestionStore {
     }
     return false;
   }
+
+  async getChunksByHash(contentHash: string): Promise<Chunk[]> {
+    const out: Chunk[] = [];
+    for (const chunks of this.chunks.values()) {
+      for (const c of chunks) {
+        if (c.contentHash === contentHash) out.push(c);
+      }
+    }
+    return out;
+  }
 }
