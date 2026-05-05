@@ -8,6 +8,11 @@ export default class GemmeraPlugin extends Plugin {
   async onload(): Promise<void> {
     this.services = createServices(this.app);
     this.services.eventBridge.start();
+    this.services.jobRunner.start();
+    // Fire reconcile in the background — hash gate keeps it cheap on warm reloads.
+    this.services.reconciler
+      .reconcile()
+      .catch((err) => console.error("[gemmera] reconcile failed", err));
 
     this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services));
 
@@ -23,6 +28,7 @@ export default class GemmeraPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    this.services?.jobRunner.stop();
     this.services?.eventBridge.stop();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }

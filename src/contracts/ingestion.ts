@@ -31,6 +31,8 @@ export interface IngestionStore {
    * and re-embedding is unnecessary. No-op when `from` is unknown.
    */
   rename(from: string, to: string): Promise<void>;
+  /** Enumerate all known note paths. Used by the reconciler to find orphans. */
+  list(): Promise<string[]>;
 }
 
 export interface IngestionPipeline {

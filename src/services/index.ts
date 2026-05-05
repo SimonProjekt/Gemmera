@@ -1,9 +1,13 @@
-import type { App } from "obsidian";
+import { FileSystemAdapter, type App } from "obsidian";
 import type {
   IndexService,
+  IngestionPipeline,
+  IngestionStore,
   JobQueue,
+  JobRunner,
   LLMService,
   PathFilter,
+  Reconciler,
   VaultService,
 } from "../contracts";
 import { OllamaLLMService } from "./ollama-llm";
@@ -13,6 +17,11 @@ import { InMemoryJobQueue } from "./in-memory-job-queue";
 import { DefaultPathFilter } from "./path-filter";
 import { ObsidianVaultEventSource } from "./obsidian-vault-events";
 import { VaultEventBridge } from "./vault-event-bridge";
+import { JsonIngestionStore } from "./json-ingestion-store";
+import { HashGatedIngestionPipeline } from "./ingestion-pipeline";
+import { MarkdownChunker } from "./markdown-chunker";
+import { IndexJobRunner } from "./job-runner";
+import { VaultReconciler } from "./vault-reconciler";
 
 export interface Services {
   llm: LLMService;
@@ -21,7 +30,13 @@ export interface Services {
   jobQueue: JobQueue;
   pathFilter: PathFilter;
   eventBridge: VaultEventBridge;
+  ingestionStore: IngestionStore;
+  ingestionPipeline: IngestionPipeline;
+  jobRunner: JobRunner;
+  reconciler: Reconciler;
 }
+
+const STATE_PATH = ".coworkmd/state.json";
 
 export function createServices(app: App): Services {
   const vault = new ObsidianVaultService(app);
@@ -32,6 +47,22 @@ export function createServices(app: App): Services {
     jobQueue,
     pathFilter,
   );
+
+  const adapter = app.vault.adapter;
+  if (!(adapter instanceof FileSystemAdapter)) {
+    throw new Error(
+      "Gemmera requires a filesystem-backed vault (desktop Obsidian).",
+    );
+  }
+  const ingestionStore = new JsonIngestionStore(adapter.getFullPath(STATE_PATH));
+  const ingestionPipeline = new HashGatedIngestionPipeline(
+    vault,
+    new MarkdownChunker(),
+    ingestionStore,
+  );
+  const jobRunner = new IndexJobRunner(jobQueue, ingestionPipeline, ingestionStore);
+  const reconciler = new VaultReconciler(vault, ingestionStore, jobQueue, pathFilter);
+
   return {
     llm: new OllamaLLMService(),
     vault,
@@ -39,6 +70,10 @@ export function createServices(app: App): Services {
     jobQueue,
     pathFilter,
     eventBridge,
+    ingestionStore,
+    ingestionPipeline,
+    jobRunner,
+    reconciler,
   };
 }
 
@@ -49,3 +84,8 @@ export { InMemoryJobQueue } from "./in-memory-job-queue";
 export { DefaultPathFilter } from "./path-filter";
 export { ObsidianVaultEventSource } from "./obsidian-vault-events";
 export { VaultEventBridge } from "./vault-event-bridge";
+export { JsonIngestionStore } from "./json-ingestion-store";
+export { HashGatedIngestionPipeline } from "./ingestion-pipeline";
+export { MarkdownChunker } from "./markdown-chunker";
+export { IndexJobRunner } from "./job-runner";
+export { VaultReconciler } from "./vault-reconciler";

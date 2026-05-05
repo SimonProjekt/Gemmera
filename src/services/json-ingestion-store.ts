@@ -63,6 +63,11 @@ export class JsonIngestionStore implements IngestionStore {
     await this.flush(data);
   }
 
+  async list(): Promise<string[]> {
+    const data = await this.load();
+    return Object.keys(data.notes);
+  }
+
   private async load(): Promise<StoreShape> {
     if (this.cache) return this.cache;
     try {

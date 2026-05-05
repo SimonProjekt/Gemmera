@@ -38,3 +38,16 @@ export interface UserIgnoreMatcher {
 export interface Reconciler {
   reconcile(): Promise<{ enqueuedIndex: number; enqueuedDelete: number }>;
 }
+
+/**
+ * Drains the JobQueue and dispatches each job to the right side of the
+ * pipeline. Autonomous once started: subscribes to JobQueue.onArrival and
+ * drains in the background. `drain()` is exposed for deterministic testing
+ * (and for the reconciler bootstrap path).
+ */
+export interface JobRunner {
+  start(): void;
+  stop(): void;
+  /** Process all currently-pending jobs and return when the queue is empty. */
+  drain(): Promise<void>;
+}

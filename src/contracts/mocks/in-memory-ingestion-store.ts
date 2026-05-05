@@ -36,4 +36,8 @@ export class InMemoryIngestionStore implements IngestionStore {
     this.notes.delete(from);
     this.chunks.delete(from);
   }
+
+  async list(): Promise<string[]> {
+    return [...this.notes.keys()];
+  }
 }
