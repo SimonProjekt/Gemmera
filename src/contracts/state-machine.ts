@@ -1,10 +1,18 @@
-export type StateMachineEventKind =
+// Events the consumer can dispatch. These are the only kinds that match
+// declared transitions in TransitionDefinition.on.
+export type ConsumerEventKind =
   | "user_action"
   | "tool_result"
   | "timer"
-  | "model_output"
-  | "limit"
-  | "retry";
+  | "model_output";
+
+// Synthetic events the framework emits when it transitions internally
+// (counter limits, retry primitive). They are recorded in the event log
+// so the turn inspector can explain the transition; they are never
+// matched against TransitionDefinition.on.
+export type FrameworkEventKind = "limit" | "retry";
+
+export type StateMachineEventKind = ConsumerEventKind | FrameworkEventKind;
 
 export interface StateMachineEvent {
   kind: StateMachineEventKind;
@@ -42,7 +50,7 @@ export interface StateDefinition {
 
 export interface TransitionDefinition {
   from: string;
-  on: { kind: StateMachineEventKind; name: string };
+  on: { kind: ConsumerEventKind; name: string };
   to: string;
 }
 

@@ -19,7 +19,9 @@ export interface JsonConstrainedDecoderOptions {
 // is deferred until LLMService grows that field.
 export class JsonConstrainedDecoder implements ConstrainedDecoder {
   private ajv = new Ajv({ allErrors: true });
-  private validators = new Map<string, ValidateFunction>();
+  // Keyed by schema identity (not stateName) so re-registering a schema
+  // for the same state automatically misses the cache and recompiles.
+  private validators = new WeakMap<JsonSchema, ValidateFunction>();
 
   constructor(
     private llm: LLMService,
@@ -55,7 +57,7 @@ export class JsonConstrainedDecoder implements ConstrainedDecoder {
     }
 
     if (schema && !this.options.escapeHatch) {
-      const validator = this.getValidator(opts.stateName, schema);
+      const validator = this.getValidator(schema);
       if (!validator(parsed)) {
         return {
           ok: false,
@@ -69,18 +71,19 @@ export class JsonConstrainedDecoder implements ConstrainedDecoder {
     return { ok: true, value: parsed, raw };
   }
 
-  private getValidator(
-    stateName: string,
-    schema: JsonSchema,
-  ): ValidateFunction {
-    const cached = this.validators.get(stateName);
+  private getValidator(schema: JsonSchema): ValidateFunction {
+    const cached = this.validators.get(schema);
     if (cached) return cached;
     const validator = this.ajv.compile(schema);
-    this.validators.set(stateName, validator);
+    this.validators.set(schema, validator);
     return validator;
   }
 }
 
+// TODO(format-json): once LLMService.ChatOptions grows native
+// `format: "json"` (with optional schema constraint for newer Ollama
+// versions), drop the inlined schema from the system message and pass
+// it on the chat options instead. Inlining bloats every call.
 function composeSystemPrompt(schema: JsonSchema | undefined): string {
   if (!schema) {
     return "Respond with valid JSON only. No preamble, no commentary, no code fences.";

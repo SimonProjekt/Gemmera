@@ -52,13 +52,18 @@ export class StateMachine {
       }
       this.limits.set(l.name, l);
     }
-    if (
-      config.timer &&
-      !this.states.has(config.timer.terminalState)
-    ) {
-      throw new Error(
-        `Timer references unknown terminal state: ${config.timer.terminalState}`,
-      );
+    if (config.timer) {
+      const { budgetMs, terminalState } = config.timer;
+      if (budgetMs <= 0 || budgetMs > 300_000) {
+        throw new Error(
+          `Timer budgetMs must be in (0, 300000] ms per planning/tool-loop.md, got ${budgetMs}`,
+        );
+      }
+      if (!this.states.has(terminalState)) {
+        throw new Error(
+          `Timer references unknown terminal state: ${terminalState}`,
+        );
+      }
     }
     for (const s of config.states) {
       if (s.retry && !this.states.has(s.retry.onExhausted)) {

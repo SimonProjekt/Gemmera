@@ -251,6 +251,12 @@ describe("StateMachine", () => {
     },
   );
 
+  // The framework correctly fires onEnter on each entry. #34's "retried
+  // states do not duplicate effects" acceptance is a consumer-side
+  // contract (only WRITE-type states perform side effects, gated by
+  // explicit user confirmation). The concrete WRITE state lands with
+  // the ingest state machine in #39, and a co-located test will assert
+  // the no-duplicate-effects invariant against that state.
   it("re-entering a state fires onEnter each time (consumer is responsible for idempotency)", async () => {
     let onEnterCount = 0;
     let sideEffectCount = 0;
