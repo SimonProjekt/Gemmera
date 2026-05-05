@@ -135,6 +135,20 @@ export class StateMachine {
     this.counterValues.set(name, 0);
   }
 
+  // Cancel the active turn. Transitions immediately to the cancellation
+  // terminal state (default "CANCELLED") via the shared unwind from #34.
+  // No-op if no turn is active.
+  async cancel(terminalState: string = "CANCELLED"): Promise<void> {
+    if (!this.active) return;
+    if (!this.states.has(terminalState)) {
+      throw new Error(`Cancel terminal state not defined: ${terminalState}`);
+    }
+    await this.transitionTo(terminalState, {
+      kind: "user_action",
+      name: "cancel",
+    });
+  }
+
   private async beginTurn(turnId: string): Promise<ActiveTurn> {
     const initial = this.config.initialState;
     this.active = { turnId, currentState: initial };

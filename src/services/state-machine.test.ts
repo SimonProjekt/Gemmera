@@ -480,4 +480,68 @@ describe("StateMachine", () => {
       /Counter not registered/,
     );
   });
+
+  it("cancel() transitions to CANCELLED via the shared unwind", async () => {
+    const calls: string[] = [];
+    const log = new InMemoryEventLog();
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "CANCELLED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      unwind: {
+        stopModelStream: () => {
+          calls.push("stopModelStream");
+        },
+        writeEvents: () => {
+          calls.push("writeEvents");
+        },
+      },
+      eventLog: log,
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await sm.cancel();
+
+    expect(sm.getActive()).toBeNull();
+    expect(calls).toEqual(["stopModelStream", "writeEvents"]);
+    const entries = await log.eventsFor("turn-1");
+    expect(
+      entries.find((e) => e.kind === "enter" && e.state === "CANCELLED"),
+    ).toBeDefined();
+  });
+
+  it("cancel(terminalState) transitions to the supplied terminal state", async () => {
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "USER_ABORTED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.cancel("USER_ABORTED");
+
+    expect(sm.getActive()).toBeNull();
+  });
+
+  it("cancel() is a no-op when no turn is active", async () => {
+    const sm = new StateMachine(basicConfig());
+    await expect(sm.cancel()).resolves.toBeUndefined();
+  });
+
+  it("cancel() throws when the supplied terminal state is not defined", async () => {
+    const sm = new StateMachine(basicConfig());
+    await sm.startTurn("turn-1");
+    await expect(sm.cancel("NONEXISTENT")).rejects.toThrow(
+      /Cancel terminal state not defined/,
+    );
+  });
 });
