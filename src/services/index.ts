@@ -1,4 +1,4 @@
-import { FileSystemAdapter, type App } from "obsidian";
+import { FileSystemAdapter, Notice, type App } from "obsidian";
 import type {
   IndexService,
   IngestionPipeline,
@@ -10,6 +10,8 @@ import type {
   VaultService,
   VectorStore,
 } from "../contracts";
+import type { GemmeraSettings } from "../settings";
+import { MockLLMService } from "./mock-llm";
 import { OllamaLLMService } from "./ollama-llm";
 import { ObsidianVaultService } from "./real-vault";
 import { VaultLinearIndexService } from "./vault-index";
@@ -47,7 +49,21 @@ const VECTORS_JSON_PATH = ".coworkmd/vectors.json";
 const DEFAULT_EMBED_MODEL = "bge-m3";
 const DEFAULT_EMBED_DIM = 1024;
 
-export function createServices(app: App): Services {
+export async function createLLMService(
+  backend: GemmeraSettings["llmBackend"],
+): Promise<LLMService> {
+  if (backend === "mock") {
+    return new MockLLMService();
+  }
+  const ollama = new OllamaLLMService();
+  if ((await ollama.isReachable()) === "missing") {
+    new Notice("Gemmera: Ollama not reachable — falling back to mock LLM.");
+    return new MockLLMService();
+  }
+  return ollama;
+}
+
+export async function createServices(app: App, settings: GemmeraSettings): Promise<Services> {
   const vault = new ObsidianVaultService(app);
   const jobQueue = new InMemoryJobQueue();
   const pathFilter = new DefaultPathFilter();
@@ -89,7 +105,7 @@ export function createServices(app: App): Services {
   );
 
   return {
-    llm: new OllamaLLMService(),
+    llm: await createLLMService(settings.llmBackend),
     vault,
     index: new VaultLinearIndexService(vault),
     jobQueue,
