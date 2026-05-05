@@ -329,4 +329,155 @@ describe("StateMachine", () => {
     const exitA = entries.find((e) => e.kind === "exit" && e.state === "A");
     expect(exitA?.triggeringEvent?.payload).toBe("[REDACTED]");
   });
+
+  it("transitions to the configured terminal state after the wall-clock budget", async () => {
+    vi.useFakeTimers();
+    const log = new InMemoryEventLog();
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "TIMED_OUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      timer: { budgetMs: 100, terminalState: "TIMED_OUT" },
+      eventLog: log,
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(sm.getActive()).toBeNull();
+    const entries = await log.eventsFor("turn-1");
+    expect(
+      entries.find((e) => e.kind === "enter" && e.state === "TIMED_OUT"),
+    ).toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it("clears the wall-clock timer when the turn ends naturally", async () => {
+    vi.useFakeTimers();
+    const log = new InMemoryEventLog();
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "TIMED_OUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      timer: { budgetMs: 100, terminalState: "TIMED_OUT" },
+      eventLog: log,
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await vi.advanceTimersByTimeAsync(200);
+
+    const entries = await log.eventsFor("turn-1");
+    expect(
+      entries.find((e) => e.kind === "enter" && e.state === "TIMED_OUT"),
+    ).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("transitions to the configured terminal when bumpCounter exceeds the limit", async () => {
+    const log = new InMemoryEventLog();
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "TOOL_FAILED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      limits: [
+        { name: "tool_call", limit: 2, terminalState: "TOOL_FAILED" },
+      ],
+      eventLog: log,
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.bumpCounter("tool_call");
+    await sm.bumpCounter("tool_call");
+    await sm.bumpCounter("tool_call");
+
+    expect(sm.getActive()).toBeNull();
+    const entries = await log.eventsFor("turn-1");
+    expect(
+      entries.find((e) => e.kind === "enter" && e.state === "TOOL_FAILED"),
+    ).toBeDefined();
+  });
+
+  it("resetCounter clears the streak and prevents the limit from triggering", async () => {
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "MODEL_INVALID_OUTPUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      limits: [
+        { name: "no_op", limit: 2, terminalState: "MODEL_INVALID_OUTPUT" },
+      ],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.bumpCounter("no_op");
+    await sm.bumpCounter("no_op");
+    sm.resetCounter("no_op");
+    await sm.bumpCounter("no_op");
+    await sm.bumpCounter("no_op");
+
+    expect(sm.getActive()?.currentState).toBe("A");
+  });
+
+  it("counters reset between turns", async () => {
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "TOOL_FAILED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      limits: [{ name: "tool_call", limit: 2, terminalState: "TOOL_FAILED" }],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.bumpCounter("tool_call");
+    await sm.bumpCounter("tool_call");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await sm.dispatch({ kind: "user_action", name: "next" });
+
+    await sm.startTurn("turn-2");
+    await sm.bumpCounter("tool_call");
+    await sm.bumpCounter("tool_call");
+    expect(sm.getActive()?.turnId).toBe("turn-2");
+    expect(sm.getActive()?.currentState).toBe("A");
+  });
+
+  it("throws when a limit references an unknown terminal state", () => {
+    expect(
+      () =>
+        new StateMachine(
+          basicConfig({
+            limits: [
+              { name: "tool_call", limit: 1, terminalState: "NONEXISTENT" },
+            ],
+          }),
+        ),
+    ).toThrow(/unknown terminal state/);
+  });
+
+  it("throws when bumpCounter is called with an unregistered counter name", async () => {
+    const sm = new StateMachine(basicConfig());
+    await sm.startTurn("turn-1");
+    await expect(sm.bumpCounter("unknown")).rejects.toThrow(
+      /Counter not registered/,
+    );
+  });
 });

@@ -2,7 +2,8 @@ export type StateMachineEventKind =
   | "user_action"
   | "tool_result"
   | "timer"
-  | "model_output";
+  | "model_output"
+  | "limit";
 
 export interface StateMachineEvent {
   kind: StateMachineEventKind;
@@ -41,6 +42,27 @@ export interface StateMachineConfig {
   // Sensitive-content redaction at the writer boundary. If provided, each
   // entry is passed through this function before being written.
   redactEvent?: (entry: EventLogEntry) => EventLogEntry;
+  // Per-turn hard stops. The framework enforces these ceilings and
+  // transitions to the configured terminal state when any is exceeded.
+  // See planning/tool-loop.md "Hard stops".
+  timer?: PerTurnTimer;
+  limits?: PerTurnLimit[];
+}
+
+export interface PerTurnTimer {
+  // Wall-clock budget per turn in milliseconds.
+  budgetMs: number;
+  // Terminal state entered when the budget is exceeded.
+  terminalState: string;
+}
+
+export interface PerTurnLimit {
+  // Counter name. Consumers call `sm.bumpCounter(name)` to increment.
+  name: string;
+  // Maximum allowed value before the limit is considered exceeded.
+  limit: number;
+  // Terminal state entered when the limit is exceeded.
+  terminalState: string;
 }
 
 // Canonical terminal state names per planning/tool-loop.md.

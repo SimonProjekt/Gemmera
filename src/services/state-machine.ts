@@ -2,6 +2,7 @@ import {
   ActiveTurn,
   EventLogEntry,
   EventLogEntryKind,
+  PerTurnLimit,
   QueuedTurn,
   StateContext,
   StateDefinition,
@@ -15,6 +16,9 @@ export class StateMachine {
   private states = new Map<string, StateDefinition>();
   private transitions = new Map<string, string>();
   private eventCounts = new Map<string, number>();
+  private limits = new Map<string, PerTurnLimit>();
+  private counterValues = new Map<string, number>();
+  private timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private config: StateMachineConfig) {
     for (const s of config.states) {
@@ -34,6 +38,25 @@ export class StateMachine {
         throw new Error(`Duplicate transition: ${key}`);
       }
       this.transitions.set(key, t.to);
+    }
+    for (const l of config.limits ?? []) {
+      if (this.limits.has(l.name)) {
+        throw new Error(`Duplicate limit: ${l.name}`);
+      }
+      if (!this.states.has(l.terminalState)) {
+        throw new Error(
+          `Limit ${l.name} references unknown terminal state: ${l.terminalState}`,
+        );
+      }
+      this.limits.set(l.name, l);
+    }
+    if (
+      config.timer &&
+      !this.states.has(config.timer.terminalState)
+    ) {
+      throw new Error(
+        `Timer references unknown terminal state: ${config.timer.terminalState}`,
+      );
     }
   }
 
@@ -82,10 +105,41 @@ export class StateMachine {
     return this.queue;
   }
 
+  // Increment a per-turn counter. If the new value exceeds the configured
+  // limit, the state machine transitions to the limit's terminal state.
+  async bumpCounter(name: string): Promise<void> {
+    if (!this.active) {
+      throw new Error("No active turn");
+    }
+    const limit = this.limits.get(name);
+    if (!limit) {
+      throw new Error(`Counter not registered: ${name}`);
+    }
+    const next = (this.counterValues.get(name) ?? 0) + 1;
+    this.counterValues.set(name, next);
+    if (next > limit.limit) {
+      await this.transitionTo(limit.terminalState, {
+        kind: "limit",
+        name,
+        payload: { limit: limit.limit, value: next },
+      });
+    }
+  }
+
+  // Reset a per-turn counter to zero. Used for "consecutive" counters
+  // (e.g. consecutive no-ops) that reset when the streak breaks.
+  resetCounter(name: string): void {
+    if (!this.limits.has(name)) {
+      throw new Error(`Counter not registered: ${name}`);
+    }
+    this.counterValues.set(name, 0);
+  }
+
   private async beginTurn(turnId: string): Promise<ActiveTurn> {
     const initial = this.config.initialState;
     this.active = { turnId, currentState: initial };
     this.eventCounts.clear();
+    this.counterValues.clear();
     const ctx: StateContext = {
       turnId,
       state: initial,
@@ -94,7 +148,21 @@ export class StateMachine {
     };
     await this.writeLog("enter", ctx);
     await this.states.get(initial)!.onEnter?.(ctx);
+    if (this.config.timer) {
+      const { budgetMs, terminalState } = this.config.timer;
+      this.timeoutId = setTimeout(() => {
+        void this.handleTimeout(terminalState);
+      }, budgetMs);
+    }
     return this.active;
+  }
+
+  private async handleTimeout(terminalState: string): Promise<void> {
+    if (!this.active) return;
+    await this.transitionTo(terminalState, {
+      kind: "timer",
+      name: "turn_timeout",
+    });
   }
 
   private async transitionTo(
@@ -118,12 +186,21 @@ export class StateMachine {
 
     if (toDef.terminal) {
       await this.runUnwind(enterCtx);
+      this.clearTimer();
       this.active = null;
       this.eventCounts.clear();
+      this.counterValues.clear();
       const next = this.queue.shift();
       if (next) {
         await this.beginTurn(next.turnId);
       }
+    }
+  }
+
+  private clearTimer(): void {
+    if (this.timeoutId !== null) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
     }
   }
 
