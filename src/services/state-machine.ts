@@ -90,7 +90,15 @@ export class StateMachine {
     const newCount = (this.eventCounts.get(fromState) ?? 0) + 1;
     this.eventCounts.set(fromState, newCount);
     if (newCount > fromDef.maxEventsPerTurn) {
-      await this.transitionTo(this.config.errorBoundedEventsState, event);
+      await this.transitionTo(this.config.errorBoundedEventsState, {
+        kind: "limit",
+        name: "bounded_events",
+        payload: {
+          state: fromState,
+          limit: fromDef.maxEventsPerTurn,
+          value: newCount,
+        },
+      });
       return;
     }
 
@@ -113,8 +121,9 @@ export class StateMachine {
     return this.queue;
   }
 
-  // Increment a per-turn counter. If the new value exceeds the configured
-  // limit, the state machine transitions to the limit's terminal state.
+  // Increment a per-turn counter. The transition fires when the counter
+  // strictly exceeds `limit` — i.e. `limit` is the maximum allowed value,
+  // so `limit: 10` permits 10 bumps and the 11th triggers the terminal.
   async bumpCounter(name: string): Promise<void> {
     if (!this.active) {
       throw new Error("No active turn");
@@ -219,6 +228,11 @@ export class StateMachine {
   }
 
   private async handleTimeout(terminalState: string): Promise<void> {
+    // Re-check active here: a dispatch() can complete a terminal transition
+    // before this fires, in which case active is null and we no-op. The
+    // setTimeout callback can also race with an in-flight dispatch on
+    // longer hook chains; serializing transitions via a lock is the
+    // principled fix once concurrent driving becomes a real scenario.
     if (!this.active) return;
     await this.transitionTo(terminalState, {
       kind: "timer",
@@ -286,14 +300,27 @@ export class StateMachine {
   private async runUnwind(ctx: StateContext): Promise<void> {
     const u = this.config.unwind;
     if (!u) return;
-    await u.stopModelStream?.(ctx);
-    await u.dropPendingToolResults?.(ctx);
-    await u.rollbackUnconfirmedWrites?.(ctx);
-    await u.writeEvents?.(ctx);
-    await u.surfaceNotice?.(ctx);
+    // Best-effort: each hook is isolated so one failure does not strand
+    // the remaining hooks, the timer, or the queue.
+    await safeRun(() => u.stopModelStream?.(ctx));
+    await safeRun(() => u.dropPendingToolResults?.(ctx));
+    await safeRun(() => u.rollbackUnconfirmedWrites?.(ctx));
+    await safeRun(() => u.writeEvents?.(ctx));
+    await safeRun(() => u.surfaceNotice?.(ctx));
   }
 }
 
 function transitionKey(from: string, kind: string, name: string): string {
   return `${from}|${kind}|${name}`;
+}
+
+async function safeRun(
+  fn: () => void | Promise<void> | undefined,
+): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("Unwind hook failed:", err);
+  }
 }

@@ -648,4 +648,67 @@ describe("StateMachine", () => {
         ),
     ).toThrow(/retry references unknown state/);
   });
+
+  it("isolates failures in unwind hooks so the rest of the unwind still runs", async () => {
+    const calls: string[] = [];
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 3 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      unwind: {
+        stopModelStream: () => {
+          calls.push("stopModelStream");
+          throw new Error("boom");
+        },
+        dropPendingToolResults: () => {
+          calls.push("dropPendingToolResults");
+        },
+        writeEvents: () => {
+          calls.push("writeEvents");
+        },
+      },
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await sm.dispatch({ kind: "user_action", name: "next" });
+
+    expect(calls).toEqual([
+      "stopModelStream",
+      "dropPendingToolResults",
+      "writeEvents",
+    ]);
+    expect(sm.getActive()).toBeNull();
+    consoleSpy.mockRestore();
+  });
+
+  it("bounded-events terminal entry carries a synthetic limit event", async () => {
+    const log = new InMemoryEventLog();
+    const config = basicConfig({
+      states: [
+        { name: "A", maxEventsPerTurn: 0 },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      eventLog: log,
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+
+    const entries = await log.eventsFor("turn-1");
+    const enterTerminal = entries.find(
+      (e) => e.kind === "enter" && e.state === "ERROR_BOUNDED",
+    );
+    expect(enterTerminal?.triggeringEvent).toEqual({
+      kind: "limit",
+      name: "bounded_events",
+      payload: { state: "A", limit: 0, value: 1 },
+    });
+  });
 });
