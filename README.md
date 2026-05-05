@@ -27,7 +27,10 @@ Planen är att publicera Gemmera på GitHub under MIT-licens. README:n kommer at
 - **Installera beroenden** — t.ex. `npm install` i projektmappen.
 - **Bygg plugin** — t.ex. `npm run build` för att generera `main.js`.
 - **Kopiera till vault** — t.ex. lägg `main.js`, `manifest.json` och `styles.css` i `<vault>/.obsidian/plugins/gemmera/`.
+- **Hämta modeller via Ollama** — `ollama pull gemma3` för chatten och `ollama pull bge-m3` för indexeringen.
 - **Aktivera** — t.ex. slå på Gemmera under Obsidians inställningar → Community plugins.
+
+Vid första aktivering bygger pluginet ett lokalt index över vaulten (chunks + embeddings) i `<vault>/.coworkmd/`. För en vault med ~5 000 anteckningar tar det 10–30 min på CPU; chatten är användbar direkt och retrieval blir gradvis bättre allt eftersom indexeringen färdigställs.
 
 *Exempel på beroenden:*
 
@@ -35,26 +38,7 @@ Planen är att publicera Gemmera på GitHub under MIT-licens. README:n kommer at
 - **Node.js** och **npm** — för bygget.
 - **Ollama** — lokalt installerad och igång.
 - **Gemma-modell** — hämtas via Ollama (storlek beroende på hårdvara).
-- **Rekommenderat:** ~8 GB RAM för mindre modell, mer för större varianter.
-
-## Distribution
-
-Planen är att publicera Gemmera på GitHub under MIT-licens. README:n kommer att innehålla en installations-checklista och en lista över beroenden. Exakt innehåll fastställs senare i projektet — nedan är ett **exempel** på hur det skulle kunna se ut.
-
-*Exempel på installations-checklista:*
-
-- **Klona repo** — t.ex. `git clone` av Gemmera-repot till valfri plats.
-- **Installera beroenden** — t.ex. `npm install` i projektmappen.
-- **Bygg plugin** — t.ex. `npm run build` för att generera `main.js`.
-- **Kopiera till vault** — t.ex. lägg `main.js`, `manifest.json` och `styles.css` i `<vault>/.obsidian/plugins/gemmera/`.
-- **Aktivera** — t.ex. slå på Gemmera under Obsidians inställningar → Community plugins.
-
-*Exempel på beroenden:*
-
-- **Obsidian** (t.ex. ≥ 1.5)
-- **Node.js** och **npm** — för bygget.
-- **Ollama** — lokalt installerad och igång.
-- **Gemma-modell** — hämtas via Ollama (storlek beroende på hårdvara).
+- **BGE-M3** — embeddingsmodell för indexering (`ollama pull bge-m3`, ~1.2 GB).
 - **Rekommenderat:** ~8 GB RAM för mindre modell, mer för större varianter.
 
 ## Säkerhetsprinciper
@@ -82,8 +66,8 @@ TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, M
 - [x] Preview-dialog
 - [x] Vault-sökning med citat
 
-### Vecka 3 (utökning)
-- [ ] Inkrementell indexering
+### Vecka 3 ✅ (utökning)
+- [x] Inkrementell indexering — markdown-medveten chunker, hash-grindad pipeline, file-event-prenumeration, BGE-M3-embedder via Ollama, vektorbutik, kall-start-rekonciliering
 
 **Slutacceptans:** en ny person installerar pluginet, följer README, och har en fungerande chatt som kan skapa filer i sin vault inom 20 min på en typisk 8 GB-bärbar.
 
