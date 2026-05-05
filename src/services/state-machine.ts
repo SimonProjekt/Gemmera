@@ -109,6 +109,7 @@ export class StateMachine {
     await toDef.onEnter?.({ turnId, state: toState, fromState, triggeringEvent });
 
     if (toDef.terminal) {
+      await this.runUnwind({ turnId, state: toState, fromState, triggeringEvent });
       this.active = null;
       this.eventCounts.clear();
       const next = this.queue.shift();
@@ -116,6 +117,16 @@ export class StateMachine {
         await this.beginTurn(next.turnId);
       }
     }
+  }
+
+  private async runUnwind(ctx: StateContext): Promise<void> {
+    const u = this.config.unwind;
+    if (!u) return;
+    await u.stopModelStream?.(ctx);
+    await u.dropPendingToolResults?.(ctx);
+    await u.rollbackUnconfirmedWrites?.(ctx);
+    await u.writeEvents?.(ctx);
+    await u.surfaceNotice?.(ctx);
   }
 }
 

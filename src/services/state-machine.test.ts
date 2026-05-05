@@ -168,4 +168,112 @@ describe("StateMachine", () => {
         ),
     ).toThrow(/Duplicate transition/);
   });
+
+  it("runs unwind hooks in defined order on entry to a terminal state", async () => {
+    const calls: string[] = [];
+    const config = basicConfig({
+      unwind: {
+        stopModelStream: () => {
+          calls.push("stopModelStream");
+        },
+        dropPendingToolResults: () => {
+          calls.push("dropPendingToolResults");
+        },
+        rollbackUnconfirmedWrites: () => {
+          calls.push("rollbackUnconfirmedWrites");
+        },
+        writeEvents: () => {
+          calls.push("writeEvents");
+        },
+        surfaceNotice: () => {
+          calls.push("surfaceNotice");
+        },
+      },
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "next" });
+    await sm.dispatch({ kind: "user_action", name: "next" });
+
+    expect(calls).toEqual([
+      "stopModelStream",
+      "dropPendingToolResults",
+      "rollbackUnconfirmedWrites",
+      "writeEvents",
+      "surfaceNotice",
+    ]);
+  });
+
+  it.each([
+    ["CANCELLED", "STREAMING", "cancel"],
+    ["TIMED_OUT", "TOOL_CALLING", "timeout"],
+    ["VALIDATION_FAILED", "VALIDATING", "validation_error"],
+  ])(
+    "passes the terminal state name as unwind reason for %s",
+    async (terminal, source, eventName) => {
+      const writeEvents = vi.fn();
+      const config: StateMachineConfig = {
+        states: [
+          { name: source, maxEventsPerTurn: 5 },
+          { name: terminal, maxEventsPerTurn: 0, terminal: true },
+          { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+        ],
+        transitions: [
+          {
+            from: source,
+            on: { kind: "user_action", name: eventName },
+            to: terminal,
+          },
+        ],
+        initialState: source,
+        errorBoundedEventsState: "ERROR_BOUNDED",
+        unwind: { writeEvents },
+      };
+      const sm = new StateMachine(config);
+      await sm.startTurn("turn-1");
+      await sm.dispatch({ kind: "user_action", name: eventName });
+
+      expect(writeEvents).toHaveBeenCalledTimes(1);
+      expect(writeEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: terminal,
+          fromState: source,
+          turnId: "turn-1",
+        }),
+      );
+    },
+  );
+
+  it("re-entering a state fires onEnter each time (consumer is responsible for idempotency)", async () => {
+    let onEnterCount = 0;
+    let sideEffectCount = 0;
+    const config: StateMachineConfig = {
+      states: [
+        {
+          name: "WRITE",
+          maxEventsPerTurn: 5,
+          onEnter: () => {
+            onEnterCount += 1;
+            if (onEnterCount === 1) sideEffectCount += 1;
+          },
+        },
+        { name: "REVIEW", maxEventsPerTurn: 5 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      transitions: [
+        { from: "WRITE", on: { kind: "user_action", name: "review" }, to: "REVIEW" },
+        { from: "REVIEW", on: { kind: "user_action", name: "rewrite" }, to: "WRITE" },
+      ],
+      initialState: "WRITE",
+      errorBoundedEventsState: "ERROR_BOUNDED",
+    };
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.dispatch({ kind: "user_action", name: "review" });
+    await sm.dispatch({ kind: "user_action", name: "rewrite" });
+
+    expect(onEnterCount).toBe(2);
+    expect(sideEffectCount).toBe(1);
+  });
 });

@@ -36,6 +36,30 @@ export interface StateMachineConfig {
   transitions: TransitionDefinition[];
   initialState: string;
   errorBoundedEventsState: string;
+  unwind?: UnwindHooks;
+}
+
+// Canonical terminal state names per planning/tool-loop.md.
+export const TERMINAL_STATES = [
+  "DONE",
+  "CANCELLED",
+  "TIMED_OUT",
+  "MODEL_INVALID_OUTPUT",
+  "TOOL_FAILED",
+  "VALIDATION_FAILED",
+] as const;
+
+export type TerminalStateName = (typeof TERMINAL_STATES)[number];
+
+// Hooks invoked in fixed order on entry to any terminal state:
+// stop model stream → drop pending tool results → roll back unconfirmed
+// writes → write events → surface notice. The framework then closes the turn.
+export interface UnwindHooks {
+  stopModelStream?: (ctx: StateContext) => void | Promise<void>;
+  dropPendingToolResults?: (ctx: StateContext) => void | Promise<void>;
+  rollbackUnconfirmedWrites?: (ctx: StateContext) => void | Promise<void>;
+  writeEvents?: (ctx: StateContext) => void | Promise<void>;
+  surfaceNotice?: (ctx: StateContext) => void | Promise<void>;
 }
 
 export interface ActiveTurn {
