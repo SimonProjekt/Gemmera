@@ -544,4 +544,108 @@ describe("StateMachine", () => {
       /Cancel terminal state not defined/,
     );
   });
+
+  it("retry() re-enters the current state and fires onExit + onEnter again", async () => {
+    const calls: string[] = [];
+    const config = basicConfig({
+      states: [
+        {
+          name: "A",
+          maxEventsPerTurn: 5,
+          retry: { max: 1, onExhausted: "MODEL_INVALID_OUTPUT" },
+          onEnter: () => {
+            calls.push("enter:A");
+          },
+          onExit: () => {
+            calls.push("exit:A");
+          },
+        },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "MODEL_INVALID_OUTPUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.retry();
+
+    expect(sm.getActive()?.currentState).toBe("A");
+    expect(calls).toEqual(["enter:A", "exit:A", "enter:A"]);
+  });
+
+  it("retry() transitions to onExhausted after max retries", async () => {
+    const config = basicConfig({
+      states: [
+        {
+          name: "A",
+          maxEventsPerTurn: 5,
+          retry: { max: 1, onExhausted: "MODEL_INVALID_OUTPUT" },
+        },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "MODEL_INVALID_OUTPUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.retry();
+    await sm.retry();
+
+    expect(sm.getActive()).toBeNull();
+  });
+
+  it("retry() bumps a global \"retry\" counter when one is configured", async () => {
+    const config = basicConfig({
+      states: [
+        {
+          name: "A",
+          maxEventsPerTurn: 10,
+          retry: { max: 5, onExhausted: "MODEL_INVALID_OUTPUT" },
+        },
+        { name: "B", maxEventsPerTurn: 3 },
+        { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+        { name: "MODEL_INVALID_OUTPUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "RETRIES_EXHAUSTED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      limits: [
+        { name: "retry", limit: 2, terminalState: "RETRIES_EXHAUSTED" },
+      ],
+    });
+    const sm = new StateMachine(config);
+    await sm.startTurn("turn-1");
+    await sm.retry();
+    await sm.retry();
+    await sm.retry();
+
+    expect(sm.getActive()).toBeNull();
+  });
+
+  it("retry() throws when called on a state with no retry config", async () => {
+    const sm = new StateMachine(basicConfig());
+    await sm.startTurn("turn-1");
+    await expect(sm.retry()).rejects.toThrow(/does not allow retries/);
+  });
+
+  it("throws when a state's retry references an unknown onExhausted state", () => {
+    expect(
+      () =>
+        new StateMachine(
+          basicConfig({
+            states: [
+              {
+                name: "A",
+                maxEventsPerTurn: 3,
+                retry: { max: 1, onExhausted: "NONEXISTENT" },
+              },
+              { name: "B", maxEventsPerTurn: 3 },
+              { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+              { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+            ],
+          }),
+        ),
+    ).toThrow(/retry references unknown state/);
+  });
 });

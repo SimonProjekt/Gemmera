@@ -18,6 +18,7 @@ export class StateMachine {
   private eventCounts = new Map<string, number>();
   private limits = new Map<string, PerTurnLimit>();
   private counterValues = new Map<string, number>();
+  private retryCounts = new Map<string, number>();
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private config: StateMachineConfig) {
@@ -57,6 +58,13 @@ export class StateMachine {
       throw new Error(
         `Timer references unknown terminal state: ${config.timer.terminalState}`,
       );
+    }
+    for (const s of config.states) {
+      if (s.retry && !this.states.has(s.retry.onExhausted)) {
+        throw new Error(
+          `State ${s.name} retry references unknown state: ${s.retry.onExhausted}`,
+        );
+      }
     }
   }
 
@@ -149,11 +157,50 @@ export class StateMachine {
     });
   }
 
+  // Retry the current state. Re-enters the same state via onExit/onEnter and
+  // increments a per-state retry counter. When the counter exceeds the state's
+  // `retry.max`, the state machine transitions to `retry.onExhausted` instead.
+  // If a per-turn `"retry"` limit is configured, retry() also bumps it so the
+  // global retry budget is enforced (see planning/tool-loop.md "Hard stops").
+  async retry(): Promise<void> {
+    if (!this.active) {
+      throw new Error("No active turn");
+    }
+    const stateDef = this.states.get(this.active.currentState)!;
+    if (!stateDef.retry) {
+      throw new Error(`State ${stateDef.name} does not allow retries`);
+    }
+
+    const next = (this.retryCounts.get(stateDef.name) ?? 0) + 1;
+    this.retryCounts.set(stateDef.name, next);
+
+    if (next > stateDef.retry.max) {
+      await this.transitionTo(stateDef.retry.onExhausted, {
+        kind: "retry",
+        name: "exhausted",
+        payload: { state: stateDef.name, attempts: next },
+      });
+      return;
+    }
+
+    if (this.limits.has("retry")) {
+      await this.bumpCounter("retry");
+      if (!this.active) return;
+    }
+
+    await this.transitionTo(stateDef.name, {
+      kind: "retry",
+      name: "again",
+      payload: { attempt: next },
+    });
+  }
+
   private async beginTurn(turnId: string): Promise<ActiveTurn> {
     const initial = this.config.initialState;
     this.active = { turnId, currentState: initial };
     this.eventCounts.clear();
     this.counterValues.clear();
+    this.retryCounts.clear();
     const ctx: StateContext = {
       turnId,
       state: initial,
@@ -204,6 +251,7 @@ export class StateMachine {
       this.active = null;
       this.eventCounts.clear();
       this.counterValues.clear();
+      this.retryCounts.clear();
       const next = this.queue.shift();
       if (next) {
         await this.beginTurn(next.turnId);

@@ -3,7 +3,8 @@ export type StateMachineEventKind =
   | "tool_result"
   | "timer"
   | "model_output"
-  | "limit";
+  | "limit"
+  | "retry";
 
 export interface StateMachineEvent {
   kind: StateMachineEventKind;
@@ -24,6 +25,15 @@ export interface StateDefinition {
   terminal?: boolean;
   onEnter?: (ctx: StateContext) => void | Promise<void>;
   onExit?: (ctx: StateContext) => void | Promise<void>;
+  // Retry policy. When `sm.retry()` is called, the framework re-enters this
+  // state via the unwind/enter path and increments a per-state retry counter.
+  // When the counter exceeds `max`, the state machine transitions to
+  // `onExhausted` instead of re-entering. See planning/tool-loop.md "Retry
+  // policy" for the mapping of states to retry budgets.
+  retry?: {
+    max: number;
+    onExhausted: string;
+  };
 }
 
 export interface TransitionDefinition {
