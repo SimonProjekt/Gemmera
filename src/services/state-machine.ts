@@ -134,6 +134,13 @@ export class StateMachine {
     }
     const next = (this.counterValues.get(name) ?? 0) + 1;
     this.counterValues.set(name, next);
+    // Log every bump so replay can reconstruct counter-triggered turns.
+    await this.writeLog("bump", {
+      turnId: this.active.turnId,
+      state: this.active.currentState,
+      fromState: this.active.currentState,
+      triggeringEvent: { kind: "limit", name, payload: { value: next } },
+    });
     if (next > limit.limit) {
       await this.transitionTo(limit.terminalState, {
         kind: "limit",

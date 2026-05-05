@@ -107,7 +107,7 @@ export interface QueuedTurn {
   turnId: string;
 }
 
-export type EventLogEntryKind = "enter" | "exit";
+export type EventLogEntryKind = "enter" | "exit" | "bump";
 
 // One row written for every state enter and exit. Payload covers the
 // triggering event (kind, name, and any tool args / results / model

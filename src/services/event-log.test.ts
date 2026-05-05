@@ -67,4 +67,55 @@ describe("replayTurn", () => {
 
     expect(stripTimestamps(replayed)).toEqual(stripTimestamps(originalEntries));
   });
+
+  it("replays a turn that ended via a counter limit", async () => {
+    const config: StateMachineConfig = {
+      states: [
+        { name: "A", maxEventsPerTurn: 5 },
+        { name: "TOOL_FAILED", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      transitions: [],
+      initialState: "A",
+      errorBoundedEventsState: "ERROR_BOUNDED",
+      limits: [{ name: "tool_call", limit: 1, terminalState: "TOOL_FAILED" }],
+    };
+    const original = new InMemoryEventLog();
+    const sm = new StateMachine({ ...config, eventLog: original });
+    await sm.startTurn("turn-1");
+    await sm.bumpCounter("tool_call");
+    await sm.bumpCounter("tool_call");
+
+    const replayed = await replayTurn(original, "turn-1", config);
+    const originalEntries = await original.eventsFor("turn-1");
+
+    expect(stripTimestamps(replayed)).toEqual(stripTimestamps(originalEntries));
+  });
+
+  it("replays a turn that ended via retry exhaustion", async () => {
+    const config: StateMachineConfig = {
+      states: [
+        {
+          name: "PARSE",
+          maxEventsPerTurn: 5,
+          retry: { max: 1, onExhausted: "MODEL_INVALID_OUTPUT" },
+        },
+        { name: "MODEL_INVALID_OUTPUT", maxEventsPerTurn: 0, terminal: true },
+        { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+      ],
+      transitions: [],
+      initialState: "PARSE",
+      errorBoundedEventsState: "ERROR_BOUNDED",
+    };
+    const original = new InMemoryEventLog();
+    const sm = new StateMachine({ ...config, eventLog: original });
+    await sm.startTurn("turn-1");
+    await sm.retry();
+    await sm.retry();
+
+    const replayed = await replayTurn(original, "turn-1", config);
+    const originalEntries = await original.eventsFor("turn-1");
+
+    expect(stripTimestamps(replayed)).toEqual(stripTimestamps(originalEntries));
+  });
 });
