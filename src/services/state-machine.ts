@@ -34,6 +34,11 @@ export class StateMachine {
         `Bounded-events error state not defined: ${config.errorBoundedEventsState}`,
       );
     }
+    if (!this.states.get(config.errorBoundedEventsState)!.terminal) {
+      throw new Error(
+        `errorBoundedEventsState ${config.errorBoundedEventsState} must be terminal`,
+      );
+    }
     for (const t of config.transitions) {
       const key = transitionKey(t.from, t.on.kind, t.on.name);
       if (this.transitions.has(key)) {
@@ -66,6 +71,11 @@ export class StateMachine {
       }
     }
     for (const s of config.states) {
+      if (s.retry && s.terminal) {
+        throw new Error(
+          `State ${s.name} cannot be both terminal and have retry config`,
+        );
+      }
       if (s.retry && !this.states.has(s.retry.onExhausted)) {
         throw new Error(
           `State ${s.name} retry references unknown state: ${s.retry.onExhausted}`,
@@ -264,8 +274,12 @@ export class StateMachine {
     toState: string,
     triggeringEvent: StateMachineEvent,
   ): Promise<void> {
-    const turnId = this.active!.turnId;
-    const fromState = this.active!.currentState;
+    if (!this.active) {
+      throw new Error("transitionTo called with no active turn");
+    }
+    const active = this.active;
+    const turnId = active.turnId;
+    const fromState = active.currentState;
     const fromDef = this.states.get(fromState)!;
     const toDef = this.states.get(toState)!;
 
@@ -280,7 +294,7 @@ export class StateMachine {
     await this.writeLog("exit", exitCtx);
     await fromDef.onExit?.(exitCtx);
 
-    this.active!.currentState = toState;
+    active.currentState = toState;
 
     const enterCtx: StateContext = {
       turnId,

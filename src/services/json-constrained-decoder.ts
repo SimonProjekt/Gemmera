@@ -27,7 +27,21 @@ export class JsonConstrainedDecoder implements ConstrainedDecoder {
     private llm: LLMService,
     private registry: SchemaRegistry,
     private options: JsonConstrainedDecoderOptions = {},
-  ) {}
+  ) {
+    if (options.escapeHatch) {
+      const env =
+        typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
+      if (env === "production") {
+        throw new Error(
+          "JsonConstrainedDecoder.escapeHatch must not be enabled in production builds",
+        );
+      }
+      // eslint-disable-next-line no-console
+      console.warn(
+        "JsonConstrainedDecoder: escapeHatch enabled — schema validation skipped (debug-only)",
+      );
+    }
+  }
 
   async decode(opts: {
     stateName: string;

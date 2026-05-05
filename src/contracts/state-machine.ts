@@ -134,6 +134,11 @@ export interface EventLogEntry {
   triggeringEvent: StateMachineEvent | null;
 }
 
+// Implementations must guarantee that any entry passed to a fully-resolved
+// `write` is visible to a subsequent `eventsFor` call for the same turn.
+// Consumers must always await `write` before relying on the entry being
+// readable; this matters for asynchronous backends (e.g. DuckDB) where
+// the in-memory shortcut of returning synchronously would mask bugs.
 export interface EventLog {
   write(entry: EventLogEntry): void | Promise<void>;
   eventsFor(turnId: string): Promise<readonly EventLogEntry[]>;

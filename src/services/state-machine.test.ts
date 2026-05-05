@@ -638,6 +638,43 @@ describe("StateMachine", () => {
     await expect(sm.retry()).rejects.toThrow(/does not allow retries/);
   });
 
+  it("throws when errorBoundedEventsState is not marked terminal", () => {
+    expect(
+      () =>
+        new StateMachine(
+          basicConfig({
+            states: [
+              { name: "A", maxEventsPerTurn: 3 },
+              { name: "B", maxEventsPerTurn: 3 },
+              { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+              { name: "ERROR_BOUNDED", maxEventsPerTurn: 0 },
+            ],
+          }),
+        ),
+    ).toThrow(/must be terminal/);
+  });
+
+  it("throws when a state has both retry config and terminal: true", () => {
+    expect(
+      () =>
+        new StateMachine(
+          basicConfig({
+            states: [
+              {
+                name: "A",
+                maxEventsPerTurn: 3,
+                terminal: true,
+                retry: { max: 1, onExhausted: "ERROR_BOUNDED" },
+              },
+              { name: "B", maxEventsPerTurn: 3 },
+              { name: "DONE", maxEventsPerTurn: 0, terminal: true },
+              { name: "ERROR_BOUNDED", maxEventsPerTurn: 0, terminal: true },
+            ],
+          }),
+        ),
+    ).toThrow(/cannot be both terminal and have retry/);
+  });
+
   it("throws when a state's retry references an unknown onExhausted state", () => {
     expect(
       () =>
