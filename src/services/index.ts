@@ -23,6 +23,8 @@ import { MarkdownChunker } from "./markdown-chunker";
 import { IngestionRunner } from "./ingestion-runner";
 import { VaultReconciler } from "./vault-reconciler";
 import { BinaryVectorStore } from "./binary-vector-store";
+import { OllamaEmbedder } from "./ollama-embedder";
+import { EmbeddingService } from "./embedding-service";
 
 export interface Services {
   llm: LLMService;
@@ -36,6 +38,7 @@ export interface Services {
   ingestionRunner: IngestionRunner;
   reconciler: Reconciler;
   vectorStore: VectorStore;
+  embeddingService: EmbeddingService;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -74,6 +77,16 @@ export function createServices(app: App): Services {
     DEFAULT_EMBED_MODEL,
     DEFAULT_EMBED_DIM,
   );
+  const embedder = new OllamaEmbedder({
+    model: DEFAULT_EMBED_MODEL,
+    dim: DEFAULT_EMBED_DIM,
+  });
+  const embeddingService = new EmbeddingService(
+    ingestionRunner,
+    embedder,
+    vectorStore,
+    ingestionStore,
+  );
 
   return {
     llm: new OllamaLLMService(),
@@ -87,6 +100,7 @@ export function createServices(app: App): Services {
     ingestionRunner,
     reconciler,
     vectorStore,
+    embeddingService,
   };
 }
 
@@ -103,3 +117,5 @@ export { MarkdownChunker } from "./markdown-chunker";
 export { IngestionRunner } from "./ingestion-runner";
 export { VaultReconciler } from "./vault-reconciler";
 export { BinaryVectorStore } from "./binary-vector-store";
+export { OllamaEmbedder } from "./ollama-embedder";
+export { EmbeddingService } from "./embedding-service";

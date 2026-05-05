@@ -9,6 +9,8 @@ export default class GemmeraPlugin extends Plugin {
     this.services = createServices(this.app);
     this.services.eventBridge.start();
     this.services.ingestionRunner.start();
+    this.services.embeddingService.start();
+    this.wireDebugLogs();
     // Fire reconcile in the background — hash gate keeps it cheap on warm reloads.
     this.services.reconciler
       .reconcile()
@@ -29,8 +31,34 @@ export default class GemmeraPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.services?.eventBridge.stop();
-    if (this.services) await this.services.ingestionRunner.stop();
+    if (this.services) {
+      await this.services.ingestionRunner.stop();
+      await this.services.embeddingService.stop();
+    }
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+  }
+
+  private wireDebugLogs(): void {
+    this.services.ingestionRunner.onResult((e) => {
+      if (e.kind === "error") {
+        console.error("[gemmera] runner error", e.job, e.error);
+        return;
+      }
+      if (e.kind === "decision") {
+        console.debug(
+          `[gemmera] ${e.decision.kind} ${e.job.kind === "rename" ? `${e.job.from}→${e.job.to}` : e.job.path}`,
+        );
+        return;
+      }
+      console.debug(`[gemmera] ${e.kind}`, e);
+    });
+    this.services.embeddingService.onEvent((e) => {
+      if (e.kind === "error") {
+        console.error("[gemmera] embed error", e);
+        return;
+      }
+      console.debug(`[gemmera] embed:${e.kind} ${e.path} (${e.count})`);
+    });
   }
 
   private async openChatView(): Promise<void> {
