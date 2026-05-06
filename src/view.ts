@@ -2,10 +2,12 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { IntentLabel, RecentTurn, RouteDecision } from "./contracts/classifier";
 import type { Services } from "./services";
+import type { GemmeraSettings } from "./settings";
 import { parseFileOps, handleFileOps } from "./fileops";
 import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
 import { DisambiguationChip } from "./disambiguation-chip";
+import { buildMessageDecoration } from "./message-decoration";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -21,7 +23,11 @@ export class GemmeraChatView extends ItemView {
   private chipEl: HTMLElement | null = null;
   private recentTurns: RecentTurn[] = [];
 
-  constructor(leaf: WorkspaceLeaf, private readonly services: Services) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    private readonly services: Services,
+    private readonly settings: GemmeraSettings,
+  ) {
     super(leaf);
   }
 
@@ -132,12 +138,32 @@ export class GemmeraChatView extends ItemView {
     }
 
     // ── Chat ──────────────────────────────────────────────────────────
-    await this.runChat(text, forcedLabel ?? route?.label ?? "ask", turnId);
+    await this.runChat(text, forcedLabel ?? route?.label ?? "ask", turnId, route ?? null);
   }
 
-  private async runChat(text: string, intent: IntentLabel, turnId: string): Promise<void> {
+  private async runChat(
+    text: string,
+    intent: IntentLabel,
+    turnId: string,
+    route: RouteDecision | null = null,
+  ): Promise<void> {
+    const decoration = buildMessageDecoration(
+      route,
+      this.settings.showClassifierDecisions,
+      this.settings.alwaysPreviewBeforeSave,
+    );
+
     this.history.push({ role: "user", content: text });
-    this.appendMessage("user", text);
+    this.appendMessage("user", text, decoration);
+
+    // Silent-save indicator: appears before the LLM call and is removed after.
+    let silentSaveEl: HTMLElement | null = null;
+    if (decoration.silentSave) {
+      silentSaveEl = this.messagesEl.createEl("div", {
+        cls: "gemmera-silent-save-indicator",
+        text: "saving as note…",
+      });
+    }
 
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
 
@@ -165,6 +191,7 @@ export class GemmeraChatView extends ItemView {
       assistantEl.addClass("gemmera-message--error");
       this.history.pop();
     } finally {
+      silentSaveEl?.remove();
       this.setInputDisabled(false);
       this.inputEl.focus();
     }
@@ -273,10 +300,18 @@ export class GemmeraChatView extends ItemView {
     return { el, textEl };
   }
 
-  private appendMessage(role: "user" | "assistant", text: string): void {
+  private appendMessage(
+    role: "user" | "assistant",
+    text: string,
+    decoration?: { badge: string | null; tooltip: string | null } | null,
+  ): void {
     const msg = this.messagesEl.createEl("div", { cls: `gemmera-message gemmera-message--${role}` });
     msg.createEl("span", { cls: "gemmera-message__role", text: role === "user" ? "Du" : "Gemma" });
     msg.createEl("p", { cls: "gemmera-message__text", text });
+    if (decoration?.badge) {
+      const badge = msg.createEl("span", { cls: "gemmera-classifier-badge", text: decoration.badge });
+      if (decoration.tooltip) badge.setAttribute("title", decoration.tooltip);
+    }
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
   }
 }
