@@ -161,12 +161,16 @@ describe("DefaultPayloadAssembler", () => {
     links.upsert("note.md", [{ raw: "neighbor" }]);
     links.upsert("neighbor.md", []);
     let outgoingCalls = 0;
+    let backlinksCalls = 0;
     const spy = {
       outgoing: (path: string) => {
         outgoingCalls++;
         return links.outgoing(path);
       },
-      backlinks: (path: string) => links.backlinks(path),
+      backlinks: (path: string) => {
+        backlinksCalls++;
+        return links.backlinks(path);
+      },
     };
     const assembler = new DefaultPayloadAssembler(spy);
     assembler.assemble("q", [
@@ -175,6 +179,7 @@ describe("DefaultPayloadAssembler", () => {
       hit({ path: "note.md", ord: 2 }),
     ]);
     expect(outgoingCalls).toBe(1);
+    expect(backlinksCalls).toBe(1);
   });
 
   it("snapshots the full payload shape with neighbors and scores enabled", () => {

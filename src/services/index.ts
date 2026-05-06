@@ -1,13 +1,11 @@
 import { join } from "path";
 import { FileSystemAdapter, Notice, type App } from "obsidian";
 import type {
-  BM25Index,
   IndexService,
   IngestionPipeline,
   IngestionStore,
   JobQueue,
   LLMService,
-  MutableLinksIndex,
   PathFilter,
   PayloadAssembler,
   Reconciler,
@@ -56,9 +54,7 @@ export interface Services {
   reconciler: Reconciler;
   vectorStore: VectorStore;
   embeddingService: EmbeddingService;
-  bm25Index: BM25Index;
   bm25IndexService: BM25IndexService;
-  linksIndex: MutableLinksIndex;
   linksIndexService: LinksIndexService;
   retriever: Retriever;
   payloadAssembler: PayloadAssembler;
@@ -153,9 +149,7 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     reconciler,
     vectorStore,
     embeddingService,
-    bm25Index,
     bm25IndexService,
-    linksIndex,
     linksIndexService,
     retriever,
     payloadAssembler,

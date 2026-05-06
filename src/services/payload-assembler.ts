@@ -80,11 +80,14 @@ function resolveNeighbors(
   cap: number,
 ): string[] {
   if (cap <= 0) return [];
-  // Order: outgoing-resolved first, then backlinks. Dedup by path before the
-  // cap so a noisy hub doesn't crowd out distinct neighbors.
+  // Order: outgoing-resolved first, then backlinks. Dedup by path so a noisy
+  // hub doesn't crowd out distinct neighbors. Each loop breaks once `cap`
+  // paths are collected — a hub with hundreds of edges would otherwise scan
+  // the full edge list before slicing.
   const seen = new Set<string>();
   const paths: string[] = [];
   for (const link of links.outgoing(path)) {
+    if (paths.length >= cap) break;
     if (!link.resolved || !link.target) continue;
     if (link.target === path) continue;
     if (seen.has(link.target)) continue;
@@ -92,14 +95,19 @@ function resolveNeighbors(
     paths.push(link.target);
   }
   for (const source of links.backlinks(path)) {
+    if (paths.length >= cap) break;
     if (source === path) continue;
     if (seen.has(source)) continue;
     seen.add(source);
     paths.push(source);
   }
-  return paths.slice(0, cap).map(titleOf);
+  return paths.map(titleOf);
 }
 
+// Mirrors HybridRetriever.titleOf: derive the title from the path basename
+// rather than the note's frontmatter `title`. This keeps neighbor titles
+// consistent with `RetrievalHit.title` so the prompt sees one rule for both.
+// Revisit if frontmatter titles become universally parsed.
 function titleOf(path: string): string {
   const slash = path.lastIndexOf("/");
   const file = slash === -1 ? path : path.slice(slash + 1);
