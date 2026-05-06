@@ -27,13 +27,16 @@ export const CLASSIFIER_DECISION_DDL = [
   ");",
 ].join("\n");
 
-/** SQL to create the `classifier_disambiguation` table. Idempotent. */
+/** SQL to create the `classifier_disambiguation` table. Idempotent.
+ *  `original_label` and `original_confidence` are nullable so fallback
+ *  decisions (no model output) can still emit a row when the user
+ *  resolves the chip. See ClassifierDisambiguationRow for details. */
 export const CLASSIFIER_DISAMBIGUATION_DDL = [
   "CREATE TABLE IF NOT EXISTS classifier_disambiguation (",
   "  turn_id            TEXT NOT NULL,",
   "  ts                 BIGINT NOT NULL,",
-  "  original_label     TEXT NOT NULL,",
-  "  original_confidence REAL NOT NULL,",
+  "  original_label     TEXT,",
+  "  original_confidence REAL,",
   "  chosen_label       TEXT,",
   "  cancelled          BOOLEAN NOT NULL DEFAULT FALSE",
   ");",
@@ -111,8 +114,8 @@ export function toDecisionRow(
 export function toDisambiguationRow(
   turnId: string,
   event: {
-    originalLabel: IntentLabel;
-    originalConfidence: number;
+    originalLabel: IntentLabel | null;
+    originalConfidence: number | null;
     chosenLabel: IntentLabel | null;
     cancelled: boolean;
   },
