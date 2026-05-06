@@ -20,7 +20,7 @@ export default class GemmeraPlugin extends Plugin {
       .reconcile()
       .catch((err) => console.error("[gemmera] reconcile failed", err));
 
-    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services));
+    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services, this.settings));
 
     this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();
