@@ -28,6 +28,10 @@ export class ClassifierError extends Error {
       | "invalid-confidence"
       | "transport",
     public readonly raw?: string,
+    /** Prompt version loaded before the call, for event-log stamping.
+     *  Not readonly — may be set after construction by the caller if the
+     *  prompt was already loaded by the time the error surface is known. */
+    public promptVersion?: string,
   ) {
     super(message);
     this.name = "ClassifierError";
@@ -87,7 +91,17 @@ export async function classifyWithLLM(
     });
 
     clearTimeout(timeoutId);
-    const output = parseAndValidate(res.content);
+
+    let output: ClassifierOutput;
+    try {
+      output = parseAndValidate(res.content);
+    } catch (parseErr) {
+      if (parseErr instanceof ClassifierError) {
+        parseErr.promptVersion = loaded.version;
+      }
+      throw parseErr;
+    }
+
     const latencyMs = Math.round(performance.now() - start);
 
     return {
@@ -99,15 +113,19 @@ export async function classifyWithLLM(
     clearTimeout(timeoutId);
 
     if (err instanceof Error && err.name === "AbortError") {
-      throw new ClassifierError("Classifier timed out", "timeout");
+      throw new ClassifierError("Classifier timed out", "timeout", undefined, loaded.version);
     }
     if (err instanceof ClassifierError) {
+      // promptVersion may already be set if from parseAndValidate.
+      if (!err.promptVersion) err.promptVersion = loaded.version;
       throw err;
     }
     // Transport / network / generic Ollama error.
     throw new ClassifierError(
       err instanceof Error ? err.message : String(err),
       "transport",
+      undefined,
+      loaded.version,
     );
   }
 }
