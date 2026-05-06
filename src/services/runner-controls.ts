@@ -71,13 +71,6 @@ export class RunnerControls {
     return { enqueued: result.enqueuedIndex };
   }
 
-  async reconcileNow(): Promise<{ enqueued: number; deleted: number }> {
-    const result = await this.reconciler.reconcile();
-    await this.store.setMeta("lastReconciledAt", Date.now());
-    this.status.recompute();
-    return { enqueued: result.enqueuedIndex, deleted: result.enqueuedDelete };
-  }
-
   /** Drain helper for tests. */
   queueSize(): number {
     return this.queue.size();

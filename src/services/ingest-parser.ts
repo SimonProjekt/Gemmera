@@ -177,8 +177,5 @@ function stringList(v: unknown): string[] {
 }
 
 function defaultRunId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `run_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+  return crypto.randomUUID();
 }

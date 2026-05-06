@@ -113,11 +113,47 @@ describe("RunnerControls", () => {
     expect((epoch as number) > 0).toBe(true);
   });
 
-  it("reconcileNow stamps lastReconciledAt", async () => {
-    const { store, controls } = setup(["a.md"]);
-    const before = Date.now();
-    await controls.reconcileNow();
-    const ts = (await store.getMeta("lastReconciledAt")) ?? 0;
-    expect(ts).toBeGreaterThanOrEqual(before);
+  it("pause-mid-batch: in-flight job finishes, remainder is re-queued in order", async () => {
+    const queue = new InMemoryJobQueue();
+    const store = new InMemoryIngestionStore();
+    const ran: string[] = [];
+    let resolveSecond: () => void = () => {};
+    const pipeline: IngestionPipeline = {
+      async ingest(path: string): Promise<IngestDecision> {
+        ran.push(path);
+        if (path === "second.md") {
+          await new Promise<void>((r) => { resolveSecond = r; });
+        }
+        return {
+          kind: "skip",
+          state: { path, contentHash: "h", bodyHash: "h", mtime: 0, frontmatter: null },
+        };
+      },
+    };
+    const runner = new IngestionRunner(queue, pipeline, store);
+    const status = new RunnerStatus(queue, runner);
+    status.start();
+    const reconciler = new StubReconciler(queue, []);
+    const controls = new RunnerControls(runner, status, store, reconciler, queue);
+    runner.start();
+
+    queue.enqueue({ kind: "index", path: "first.md" });
+    queue.enqueue({ kind: "index", path: "second.md" });
+    queue.enqueue({ kind: "index", path: "third.md" });
+    queue.enqueue({ kind: "index", path: "fourth.md" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ran).toEqual(["first.md", "second.md"]);
+
+    await controls.pause();
+    resolveSecond();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Pause halted the loop after second finished; third + fourth stayed queued.
+    expect(ran).toEqual(["first.md", "second.md"]);
+    expect(queue.size()).toBe(2);
+
+    await controls.resume();
+    await runner.drainNow();
+    expect(ran).toEqual(["first.md", "second.md", "third.md", "fourth.md"]);
   });
 });

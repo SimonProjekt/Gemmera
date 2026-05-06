@@ -10,6 +10,12 @@ export interface WriteNewOptions {
 export interface AppendOptions {
   /** Override for tests. */
   now?: () => number;
+  /**
+   * Expected mtime of the target captured during preview. If the file's
+   * actual mtime no longer matches, the append throws — protects against
+   * a concurrent edit between preview confirmation and write.
+   */
+  expectedMtime?: number;
 }
 
 /**
@@ -48,6 +54,14 @@ export class IngestWriter {
     const now = opts.now ?? (() => Date.now());
     if (!(await this.vault.exists(targetPath))) {
       throw new Error(`append target missing: ${targetPath}`);
+    }
+    if (opts.expectedMtime !== undefined) {
+      const stat = await this.vault.stat(targetPath);
+      if (stat.mtime !== opts.expectedMtime) {
+        throw new Error(
+          `append target drifted: ${targetPath} (expected mtime ${opts.expectedMtime}, found ${stat.mtime})`,
+        );
+      }
     }
     const existing = await this.vault.read(targetPath);
     const heading = `## ${isoDate(now())}`;

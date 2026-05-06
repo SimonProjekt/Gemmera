@@ -26,7 +26,7 @@ function setup(now: number, files: Record<string, string> = {}) {
   const store = new InMemoryIngestionStore();
   const queue = new InMemoryJobQueue();
   const reconciler = new VaultReconciler(vault, store, queue, new DefaultPathFilter());
-  const setTimer = vi.fn(() => "TIMER" as unknown);
+  const setTimer = vi.fn((_cb: () => void, _ms: number): unknown => "TIMER");
   const clearTimer = vi.fn();
   const sched = new ScheduledReconciler({
     vault,
@@ -87,6 +87,51 @@ describe("ScheduledReconciler", () => {
 
     // vault unused-warn silencer
     expect(vault).toBeDefined();
+  });
+
+  it("when the timer fires, it runs reconciliation and reschedules", async () => {
+    const now = 100 * WEEK_MS;
+    const { store, sched, setTimer } = setup(now, { "a.md": "alpha" });
+    await store.setMeta("lastReconciledAt", now - 1000);
+
+    await sched.start();
+    expect(setTimer).toHaveBeenCalledTimes(1);
+    // Pull the scheduled callback and invoke it manually.
+    const cb = setTimer.mock.calls[0]![0]!;
+    cb();
+    // Allow the runNow + setMeta chain to settle.
+    await new Promise((r) => setTimeout(r, 5));
+    // After firing, lastReconciledAt is the current `now`, and a new timer
+    // is scheduled for the full week.
+    expect(await store.getMeta("lastReconciledAt")).toBe(now);
+    expect(setTimer).toHaveBeenCalledTimes(2);
+    expect(setTimer.mock.calls[1]![1]).toBe(WEEK_MS);
+  });
+
+  it("skips rehash when vault mtime matches stored mtime", async () => {
+    const now = 100 * WEEK_MS;
+    const vault = new MockVaultService({ "a.md": "alpha-clean" });
+    vault.setMtime("a.md", 5000);
+    const store = new InMemoryIngestionStore();
+    const queue = new InMemoryJobQueue();
+    const reconciler = new VaultReconciler(vault, store, queue, new DefaultPathFilter());
+    const sched = new ScheduledReconciler({
+      vault,
+      store,
+      reconciler,
+      now: () => now,
+      setTimer: () => "TIMER" as unknown,
+      clearTimer: () => {},
+    });
+    // Seed prior with a hash that DOESN'T match current bytes — but matching
+    // mtime should make us trust the stored hash and skip the rehash.
+    await store.upsert(
+      { path: "a.md", contentHash: "stale", bodyHash: "stale", mtime: 5000, frontmatter: null },
+      [],
+    );
+
+    const report = await sched.runNow();
+    expect(report.hashChanged).toEqual([]);
   });
 
   it("stop() clears the timer", async () => {

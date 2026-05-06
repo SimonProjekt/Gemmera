@@ -2,37 +2,68 @@ import { Notice, PluginSettingTab, Setting, type App, type Plugin } from "obsidi
 import type { DriftReport, IngestionStore } from "../contracts";
 import type { RunnerControls } from "../services/runner-controls";
 import type { ScheduledReconciler } from "../services/scheduled-reconciler";
+import type { GemmeraSettings } from "../settings";
+
+interface IndexerStateSnapshot {
+  paused: boolean;
+  lastReconciledAt: number;
+  lastRebuiltAt: number;
+  drift: DriftReport | null;
+}
+
+const EMPTY_SNAPSHOT: IndexerStateSnapshot = {
+  paused: false,
+  lastReconciledAt: 0,
+  lastRebuiltAt: 0,
+  drift: null,
+};
 
 /**
  * Plugin settings UI (#15f). Exposes the indexer controls built in #15c–e:
  * pause toggle, rebuild button (with confirm), reconcile button, last-run
- * timestamps, and the most recent drift report.
+ * timestamps, and the most recent drift report. Also exposes the ingest
+ * settings (inboxFolder, dedupThreshold, alwaysPreview).
  *
- * Re-renders on `display()` — Obsidian calls this when the user opens the
- * settings tab, which is enough freshness for an ops surface.
+ * Obsidian's `display()` is synchronous, so meta is loaded into a cached
+ * snapshot first. `refresh()` reloads then re-renders; the UI calls it
+ * after any action that mutates persisted state.
  */
 export class GemmeraSettingsTab extends PluginSettingTab {
+  private snapshot: IndexerStateSnapshot = EMPTY_SNAPSHOT;
+
   constructor(
     app: App,
     plugin: Plugin,
     private readonly controls: RunnerControls,
     private readonly scheduled: ScheduledReconciler,
     private readonly store: IngestionStore,
+    private readonly settings: GemmeraSettings,
+    private readonly saveSettings: () => Promise<void>,
   ) {
     super(app, plugin);
   }
 
-  async display(): Promise<void> {
+  async refresh(): Promise<void> {
+    this.snapshot = {
+      paused: this.controls.isPaused(),
+      lastReconciledAt: (await this.store.getMeta("lastReconciledAt")) ?? 0,
+      lastRebuiltAt: (await this.store.getMeta("lastRebuiltAt")) ?? 0,
+      drift: (await this.store.getMeta("lastDriftReport")) ?? null,
+    };
+    this.display();
+  }
+
+  display(): void {
     const { containerEl } = this as unknown as { containerEl: HTMLElement };
     containerEl.empty();
     containerEl.createEl("h2", { text: "Gemmera — Indexer" });
 
-    const paused = this.controls.isPaused();
-    const lastReconciled = (await this.store.getMeta("lastReconciledAt")) ?? 0;
-    const lastRebuilt = (await this.store.getMeta("lastRebuiltAt")) ?? 0;
-    const drift = (await this.store.getMeta("lastDriftReport")) as
-      | DriftReport
-      | null;
+    const { paused, lastReconciled, lastRebuilt, drift } = {
+      paused: this.snapshot.paused,
+      lastReconciled: this.snapshot.lastReconciledAt,
+      lastRebuilt: this.snapshot.lastRebuiltAt,
+      drift: this.snapshot.drift,
+    };
 
     new Setting(containerEl)
       .setName("Pause indexer")
@@ -45,6 +76,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
           if (value) await this.controls.pause();
           else await this.controls.resume();
           new Notice(value ? "Gemmera: indexer paused" : "Gemmera: indexer resumed");
+          await this.refresh();
         });
       });
 
@@ -63,7 +95,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
           if (!ok) return;
           const { enqueued } = await this.controls.rebuild();
           new Notice(`Gemmera: rebuild queued ${enqueued} note(s)`);
-          await this.display();
+          await this.refresh();
         });
       });
 
@@ -77,7 +109,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
           new Notice(
             `Gemmera: drift — ${report.added.length} added, ${report.removed.length} removed, ${report.hashChanged.length} changed`,
           );
-          await this.display();
+          await this.refresh();
         });
       });
 
@@ -98,6 +130,49 @@ export class GemmeraSettingsTab extends PluginSettingTab {
       driftList.createEl("li", { text: `Removed: ${drift.removed.length}` });
       driftList.createEl("li", { text: `Hash changed: ${drift.hashChanged.length}` });
     }
+
+    containerEl.createEl("h2", { text: "Gemmera — Capture" });
+
+    new Setting(containerEl)
+      .setName("Inbox folder")
+      .setDesc("Folder where new notes from the chat capture go. Trailing slash optional.")
+      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+        text.setPlaceholder?.("Inbox/");
+        text.setValue(this.settings.inboxFolder);
+        text.onChange(async (value: string) => {
+          this.settings.inboxFolder = value || "Inbox/";
+          await this.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Dedup threshold")
+      .setDesc(
+        "Cosine score above which a similar note is treated as a near-duplicate (0–1). Default 0.85.",
+      )
+      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+        text.setPlaceholder?.("0.85");
+        text.setValue(String(this.settings.dedupThreshold));
+        text.onChange(async (value: string) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return;
+          this.settings.dedupThreshold = parsed;
+          await this.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Always preview before save")
+      .setDesc(
+        "When off, high-confidence creates skip the preview modal. Append and dedup-ask always preview.",
+      )
+      .addToggle((toggle: { setValue: (v: boolean) => unknown; onChange: (cb: (v: boolean) => void) => unknown }) => {
+        toggle.setValue(this.settings.alwaysPreview);
+        toggle.onChange(async (value: boolean) => {
+          this.settings.alwaysPreview = value;
+          await this.saveSettings();
+        });
+      });
   }
 }
 

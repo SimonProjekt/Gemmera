@@ -200,6 +200,41 @@ describe("runIngest", () => {
     expect(result.kind).toBe("cancelled");
   });
 
+  it("alwaysPreview=false: bypasses preview for high-confidence creates", async () => {
+    let previewCalls = 0;
+    const handler: PreviewHandler = async () => {
+      previewCalls++;
+      return { action: "confirm" };
+    };
+    const { deps } = setup({ preview: handler });
+    const result = await runIngest(
+      { text: "x" },
+      { ...deps, alwaysPreview: false },
+    );
+    expect(result.kind).toBe("saved");
+    expect(previewCalls).toBe(0);
+  });
+
+  it("alwaysPreview=false: still previews for append and dedup_ask", async () => {
+    const body = "# Decisions\n\nWe ship v2.";
+    const bodyHash = createHash("sha256").update(body).digest("hex");
+    let previewCalls = 0;
+    const handler: PreviewHandler = async () => {
+      previewCalls++;
+      return { action: "dedup_choice", choice: "append" };
+    };
+    const { deps } = setup({
+      vaultFiles: { "Existing/standup.md": "# Existing\n" },
+      storeNotes: [{ path: "Existing/standup.md", bodyHash }],
+      preview: handler,
+    });
+    await runIngest(
+      { text: "Q2 standup notes" },
+      { ...deps, alwaysPreview: false },
+    );
+    expect(previewCalls).toBeGreaterThan(0);
+  });
+
   it("emits an event-log entry for every orchestrator phase (issue #13 acceptance)", async () => {
     const { deps } = setup({ preview: autoConfirm });
     const eventLog = new InMemoryEventLog();

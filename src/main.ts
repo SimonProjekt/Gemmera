@@ -31,15 +31,18 @@ export default class GemmeraPlugin extends Plugin {
       .start()
       .catch((err) => console.error("[gemmera] scheduled reconcile failed", err));
 
-    this.addSettingTab(
-      new GemmeraSettingsTab(
-        this.app,
-        this,
-        this.services.runnerControls,
-        this.services.scheduledReconciler,
-        this.services.ingestionStore,
-      ),
+    const settingsTab = new GemmeraSettingsTab(
+      this.app,
+      this,
+      this.services.runnerControls,
+      this.services.scheduledReconciler,
+      this.services.ingestionStore,
+      this.settings,
+      () => this.saveData(this.settings),
     );
+    // Pre-load the snapshot so the first paint of the tab is sync.
+    void settingsTab.refresh();
+    this.addSettingTab(settingsTab);
 
     this.registerView(
       VIEW_TYPE,

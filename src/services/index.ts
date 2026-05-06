@@ -41,11 +41,23 @@ import type { EventLog, Retriever } from "../contracts";
 
 /**
  * Cold-vault stand-in retriever. Returns no hits — used until the hybrid
- * retriever (#8) is wired into the dev branch. The strategy step already
- * tolerates an empty result and falls through to a `create` decision.
+ * retriever (#8) is wired into the dev branch. The strategy step tolerates
+ * an empty result and falls through to a `create` decision.
+ *
+ * TODO(#8): replace with HybridRetriever once the wiring branch lands.
  */
 class EmptyRetriever implements Retriever {
-  async retrieve() { return []; }
+  private warned = false;
+  async retrieve(): Promise<[]> {
+    if (!this.warned) {
+      this.warned = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[gemmera] retriever stub — similarity-based dedup is disabled until #8 lands",
+      );
+    }
+    return [];
+  }
 }
 
 export interface Services {

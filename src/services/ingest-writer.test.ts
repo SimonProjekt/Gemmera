@@ -103,4 +103,29 @@ describe("IngestWriter", () => {
       writer.appendUnderDatedHeading("does/not/exist.md", "x"),
     ).rejects.toThrow(/missing/);
   });
+
+  it("throws when expectedMtime no longer matches the target's mtime (drift)", async () => {
+    const target = "Notes/log.md";
+    const vault = new MockVaultService({ [target]: "old\n" });
+    vault.setMtime(target, 1000);
+    const writer = new IngestWriter(vault);
+
+    // Simulate an external edit while preview was open: bump mtime.
+    vault.setMtime(target, 2000);
+
+    await expect(
+      writer.appendUnderDatedHeading(target, "new content", { expectedMtime: 1000 }),
+    ).rejects.toThrow(/drifted/);
+  });
+
+  it("appends when expectedMtime matches", async () => {
+    const target = "Notes/log.md";
+    const vault = new MockVaultService({ [target]: "old\n" });
+    vault.setMtime(target, 1000);
+    const writer = new IngestWriter(vault);
+
+    await writer.appendUnderDatedHeading(target, "new content", { expectedMtime: 1000 });
+    const result = await vault.read(target);
+    expect(result).toContain("new content");
+  });
 });

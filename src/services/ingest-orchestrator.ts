@@ -16,6 +16,7 @@ import type {
 import { parseContent } from "./ingest-parser";
 import { decideStrategy } from "./ingest-strategy";
 import { IngestWriter } from "./ingest-writer";
+import { unique } from "./util";
 
 const STATES = {
   parse: "PARSE_CONTENT",
@@ -139,43 +140,65 @@ export async function runIngest(
   let strategy = decision.strategy;
   await enter(STATES.decide, { kind: strategy.kind });
 
+  // For append/dedup_ask, capture the target's mtime now so the writer can
+  // detect drift between preview and write. If the user edited the target
+  // during preview, we abort rather than silently clobber.
+  let expectedMtime: number | undefined;
+  if (strategy.kind === "append" || strategy.kind === "dedup_ask") {
+    try {
+      expectedMtime = (await deps.vault.stat(strategy.target)).mtime;
+    } catch {
+      expectedMtime = undefined;
+    }
+  }
+
   // ── PREVIEW ──────────────────────────────────────────────────────────
-  await enter(STATES.preview, { kind: previewKindFor(strategy) });
-  for (let i = 0; i < 10; i++) {
-    const previewKind = previewKindFor(strategy);
-    const result = await deps.preview({ kind: previewKind, spec, strategy });
-    if (result.action === "cancel") {
-      await enter(STATES.cancelled, { from: "preview" });
-      return { kind: "cancelled" };
-    }
-    if (result.action === "edit") {
-      spec = result.spec;
-      continue;
-    }
-    if (result.action === "dedup_choice") {
-      if (result.choice === "cancel") {
-        await enter(STATES.cancelled, { from: "dedup" });
+  // Bypass when the user has opted out of always-preview AND the case is
+  // unambiguous: a plain create with high confidence. Append and dedup_ask
+  // always preview — they touch existing notes.
+  const skipPreview =
+    deps.alwaysPreview === false &&
+    strategy.kind === "create" &&
+    spec.cowork.confidence === "high";
+
+  if (!skipPreview) {
+    await enter(STATES.preview, { kind: previewKindFor(strategy) });
+    for (let i = 0; i < 10; i++) {
+      const previewKind = previewKindFor(strategy);
+      const result = await deps.preview({ kind: previewKind, spec, strategy });
+      if (result.action === "cancel") {
+        await enter(STATES.cancelled, { from: "preview" });
         return { kind: "cancelled" };
       }
-      if (strategy.kind !== "dedup_ask") {
-        await enter(STATES.failed, { reason: "dedup_choice_without_dedup_ask" });
-        return { kind: "failed", reason: "dedup_choice_without_dedup_ask" };
+      if (result.action === "edit") {
+        spec = result.spec;
+        continue;
       }
-      if (result.choice === "append") {
-        strategy = { kind: "append", target: strategy.target };
-      } else {
-        // save_anyway — fall through to a regular create. Surface the
-        // matched note as a related link so the user sees the connection.
-        strategy = {
-          kind: "create",
-          related: unique([...spec.related, strategy.target]),
-        };
+      if (result.action === "dedup_choice") {
+        if (result.choice === "cancel") {
+          await enter(STATES.cancelled, { from: "dedup" });
+          return { kind: "cancelled" };
+        }
+        if (strategy.kind !== "dedup_ask") {
+          await enter(STATES.failed, { reason: "dedup_choice_without_dedup_ask" });
+          return { kind: "failed", reason: "dedup_choice_without_dedup_ask" };
+        }
+        if (result.choice === "append") {
+          strategy = { kind: "append", target: strategy.target };
+        } else {
+          // save_anyway — fall through to a regular create. Surface the
+          // matched note as a related link so the user sees the connection.
+          strategy = {
+            kind: "create",
+            related: unique([...spec.related, strategy.target]),
+          };
+        }
+        // The user has resolved the dedup; proceed straight to write.
+        break;
       }
-      // The user has resolved the dedup; proceed straight to write.
+      // confirm
       break;
     }
-    // confirm
-    break;
   }
 
   // ── WRITE ────────────────────────────────────────────────────────────
@@ -190,7 +213,9 @@ export async function runIngest(
       return { kind: "failed", reason: "append_target_missing" };
     }
     try {
-      await deps.writer.appendUnderDatedHeading(strategy.target, spec.body_markdown);
+      await deps.writer.appendUnderDatedHeading(strategy.target, spec.body_markdown, {
+        expectedMtime,
+      });
     } catch (err) {
       const reason = `write:${stringifyError(err)}`;
       await enter(STATES.failed, { reason });
@@ -220,20 +245,13 @@ export async function runIngest(
 }
 
 function freshTurnId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `turn_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+  return crypto.randomUUID();
 }
 
 function previewKindFor(strategy: IngestStrategy): IngestPreview["kind"] {
   if (strategy.kind === "dedup_ask") return "dedup";
   if (strategy.kind === "append") return "append";
   return "save";
-}
-
-function unique(items: string[]): string[] {
-  return [...new Set(items)];
 }
 
 function stringifyError(err: unknown): string {

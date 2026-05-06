@@ -155,6 +155,25 @@ describe("decideStrategy", () => {
     expect(result.strategy.related).toEqual(["a.md", "b.md"]);
   });
 
+  it("short-circuits past LLM when top hit score is below the floor", async () => {
+    const store = new InMemoryIngestionStore();
+    let llmCalled = false;
+    const llm: LLMService = {
+      async chat() { llmCalled = true; return { content: "" }; },
+      async isReachable() { return "running"; },
+      async listModels() { return []; },
+      async pickDefaultModel() { return "mock"; },
+    };
+    const result = await decideStrategy(spec("body"), {
+      llm,
+      promptLoader,
+      retriever: new StubRetriever([hit("a.md", 0.1), hit("b.md", 0.05)]),
+      store,
+    });
+    expect(llmCalled).toBe(false);
+    expect(result.strategy.kind).toBe("create");
+  });
+
   it("treats retriever errors as cold vault and returns create", async () => {
     const store = new InMemoryIngestionStore();
     const result = await decideStrategy(spec("body"), {

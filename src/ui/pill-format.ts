@@ -1,5 +1,11 @@
 import type { RunnerStatusSnapshot } from "../services/runner-status";
 
+/**
+ * Vaults below this size hide the pill entirely. Cold start finishes faster
+ * than the eye can register, and a flicker is worse than no signal.
+ */
+export const TINY_VAULT_THRESHOLD = 50;
+
 export interface PillView {
   /** Text to render. Empty when the pill should be hidden. */
   text: string;
@@ -19,7 +25,7 @@ export interface PillView {
  */
 export function formatPill(
   snapshot: RunnerStatusSnapshot,
-  tinyVaultThreshold = 50,
+  tinyVaultThreshold: number = TINY_VAULT_THRESHOLD,
 ): PillView {
   if (snapshot.phase === "paused") {
     const total = snapshot.total ?? 0;

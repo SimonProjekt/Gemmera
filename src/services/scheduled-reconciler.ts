@@ -91,6 +91,12 @@ export class ScheduledReconciler {
       }
       const prior = await this.deps.store.get(path);
       if (!prior) continue;
+      // Fast path: if mtime matches, skip the read+hash. On a 5k-vault this
+      // turns minutes of work into a no-op for clean drift checks. Falls
+      // through to the slow path when mtime differs OR is unavailable
+      // (mtime===0 in the mock means "not set").
+      const stat = await this.deps.vault.stat(path).catch(() => null);
+      if (stat && stat.mtime > 0 && stat.mtime === prior.mtime) continue;
       const raw = await this.deps.vault.read(path);
       const hash = sha256(raw);
       if (hash !== prior.contentHash) hashChanged.push(path);

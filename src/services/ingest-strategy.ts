@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { unique } from "./util";
 import type {
   IngestStrategy,
   IngestionStore,
@@ -21,6 +22,12 @@ export interface IngestStrategyDeps {
 }
 
 const DEFAULT_DEDUP_THRESHOLD = 0.85;
+/**
+ * Below this score the LLM dedup-decider almost always returns `new`. Skip
+ * the LLM call and short-circuit to create+related-links instead. Saves a
+ * round-trip on the common "candidate has weak/no signal" case.
+ */
+const LLM_FLOOR_SCORE = 0.3;
 
 /**
  * Decide whether the candidate becomes a new note, an append, or asks the
@@ -82,7 +89,15 @@ export async function decideStrategy(
     };
   }
 
-  // 4. LLM-driven fuzzy decision. Permissive parsing — anything off-schema
+  // 4. Low-score floor: if even the top hit is weak, skip the LLM call.
+  //    The dedup-decider will almost always return `new` for these and the
+  //    LLM round-trip is pure latency.
+  if (top.score < LLM_FLOOR_SCORE) {
+    const related = unique([...spec.related, ...hits.slice(0, 3).map((h) => h.path)]);
+    return { strategy: { kind: "create", related }, topHits: hits };
+  }
+
+  // 5. LLM-driven fuzzy decision. Permissive parsing — anything off-schema
   //    falls back to `create` so a flaky model can't block ingestion.
   const llmDecision = await consultLlm(spec, hits, deps, signal);
   if (llmDecision) return { strategy: llmDecision, topHits: hits };
@@ -187,8 +202,4 @@ function interpret(
 
 function sha256(s: string): string {
   return createHash("sha256").update(s, "utf8").digest("hex");
-}
-
-function unique(items: string[]): string[] {
-  return [...new Set(items)];
 }
