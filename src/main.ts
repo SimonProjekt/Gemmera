@@ -14,6 +14,8 @@ export default class GemmeraPlugin extends Plugin {
     this.services.eventBridge.start();
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();
+    this.services.bm25IndexService.start();
+    this.services.linksIndexService.start();
     this.wireDebugLogs();
     // Fire reconcile in the background — hash gate keeps it cheap on warm reloads.
     this.services.reconciler
@@ -38,6 +40,8 @@ export default class GemmeraPlugin extends Plugin {
     if (this.services) {
       await this.services.ingestionRunner.stop();
       await this.services.embeddingService.stop();
+      await this.services.bm25IndexService.stop();
+      await this.services.linksIndexService.stop();
     }
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
@@ -62,6 +66,26 @@ export default class GemmeraPlugin extends Plugin {
         return;
       }
       console.debug(`[gemmera] embed:${e.kind} ${e.path} (${e.count})`);
+    });
+    this.services.bm25IndexService.onEvent((e) => {
+      if (e.kind === "error") {
+        console.error("[gemmera] bm25 error", e);
+        return;
+      }
+      const count = "count" in e ? e.count : 0;
+      console.debug(`[gemmera] bm25:${e.kind} ${e.path} (${count})`);
+    });
+    this.services.linksIndexService.onEvent((e) => {
+      if (e.kind === "error") {
+        console.error("[gemmera] links error", e);
+        return;
+      }
+      if (e.kind === "renamed") {
+        console.debug(`[gemmera] links:renamed ${e.from}→${e.to}`);
+        return;
+      }
+      const count = "linkCount" in e ? e.linkCount : 0;
+      console.debug(`[gemmera] links:${e.kind} ${e.path} (${count})`);
     });
   }
 
