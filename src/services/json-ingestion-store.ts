@@ -102,6 +102,15 @@ export class JsonIngestionStore implements IngestionStore {
     return out;
   }
 
+  async findByBodyHash(hash: string): Promise<string[]> {
+    const data = await this.load();
+    const out: string[] = [];
+    for (const [path, state] of Object.entries(data.notes)) {
+      if (state.bodyHash === hash) out.push(path);
+    }
+    return out;
+  }
+
   private async load(): Promise<StoreShape> {
     if (this.cache) return this.cache;
     try {

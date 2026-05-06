@@ -1,6 +1,15 @@
 import type { JobQueue } from "../contracts";
 import type { IngestionRunner } from "./ingestion-runner";
 
+/**
+ * Subset of IngestionRunner that RunnerStatus actually depends on. Tests
+ * pass a plain stub matching this shape; production passes the runner.
+ */
+export interface RunnerStatusSource {
+  onResult(cb: (e: unknown) => void): () => void;
+  workSize(): number;
+}
+
 export type IndexerPhase = "idle" | "running" | "paused";
 
 export interface RunnerStatusSnapshot {
@@ -47,7 +56,7 @@ export class RunnerStatus {
 
   constructor(
     private readonly queue: JobQueue,
-    private readonly runner: Pick<IngestionRunner, "onResult">,
+    private readonly runner: Pick<IngestionRunner, "onResult" | "workSize">,
   ) {}
 
   start(): void {
@@ -74,7 +83,11 @@ export class RunnerStatus {
    * for mid-batch arrivals that `onArrival` would miss.
    */
   recompute(): void {
-    const pending = this.queue.size();
+    // Queue size + in-flight is the true pending count. Reading queue.size()
+    // alone would underreport during runner draining, since drain() empties
+    // the queue at the start of each batch even though jobs are still in
+    // flight inside the for-loop.
+    const pending = this.runner.workSize();
     if (pending === 0) {
       this.high = 0;
       this.publish({

@@ -26,6 +26,11 @@ export class IngestionRunner {
   private running = false;
   private paused = false;
   private listeners = new Set<(e: RunnerEvent) => void>();
+  // Jobs the runner has drained from the queue but has not yet emitted a
+  // result for. Necessary because `processUntilEmpty` drains in batches —
+  // `queue.size()` alone underreports work-in-progress and would tell
+  // RunnerStatus the indexer is idle while 999 jobs are still iterating.
+  private inFlightJobs = 0;
 
   constructor(
     private readonly queue: JobQueue,
@@ -70,7 +75,17 @@ export class IngestionRunner {
   }
 
   isIdle(): boolean {
-    return !this.running && this.queue.size() === 0;
+    return !this.running && this.queue.size() === 0 && this.inFlightJobs === 0;
+  }
+
+  /**
+   * Total work the runner currently knows about: queued + drained-but-not-
+   * yet-emitted. RunnerStatus reads this so the chat-header pill reflects
+   * actual progress rather than dropping to "idle" the moment the runner
+   * empties the queue at the start of a batch.
+   */
+  workSize(): number {
+    return this.queue.size() + this.inFlightJobs;
   }
 
   /** Run the queue until empty. Safe to call concurrently — work coalesces. */
@@ -90,19 +105,28 @@ export class IngestionRunner {
     try {
       while (!this.paused && this.queue.size() > 0) {
         const jobs = this.queue.drain();
+        this.inFlightJobs += jobs.length;
         for (const job of jobs) {
           if (this.paused) {
             // Re-queue jobs we drained but haven't started. Order is
             // preserved because nothing else has run between drain and
-            // re-enqueue.
+            // re-enqueue. Decrement in-flight by one for each job moved
+            // back to the queue so workSize() stays consistent.
             this.queue.enqueue(job);
+            this.inFlightJobs--;
             continue;
           }
+          let event: RunnerEvent;
           try {
-            await this.runOne(job);
+            event = await this.runOne(job);
           } catch (error) {
-            this.emit({ kind: "error", job, error });
+            event = { kind: "error", job, error };
           }
+          // Decrement BEFORE emit. Listeners (RunnerStatus) read workSize()
+          // from inside the emit callback; a job about to emit a result
+          // must already be counted as done, not in flight.
+          this.inFlightJobs--;
+          this.emit(event);
         }
       }
     } finally {
@@ -110,27 +134,24 @@ export class IngestionRunner {
     }
   }
 
-  private async runOne(job: IndexJob): Promise<void> {
+  private async runOne(job: IndexJob): Promise<RunnerEvent> {
     if (job.kind === "index") {
       const decision = await this.pipeline.ingest(job.path);
-      this.emit({ kind: "decision", job, decision });
-      return;
+      return { kind: "decision", job, decision };
     }
     if (job.kind === "delete") {
       await this.store.delete(job.path);
-      this.emit({ kind: "deleted", path: job.path });
-      return;
+      return { kind: "deleted", path: job.path };
     }
     // rename
     const prior = await this.store.get(job.from);
     if (prior) {
       await this.store.rename(job.from, job.to);
-      this.emit({ kind: "renamed", from: job.from, to: job.to });
-      return;
+      return { kind: "renamed", from: job.from, to: job.to };
     }
     // Unknown source — fall through to a normal index of the new path.
     const decision = await this.pipeline.ingest(job.to);
-    this.emit({ kind: "decision", job, decision });
+    return { kind: "decision", job, decision };
   }
 
   private emit(event: RunnerEvent): void {

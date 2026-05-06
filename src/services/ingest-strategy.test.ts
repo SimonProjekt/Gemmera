@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { InMemoryIngestionStore } from "../contracts/mocks/in-memory-ingestion-store";
 import type {
   ChatOptions,
-  Chunk,
   LLMReachability,
   LLMResponse,
   LLMService,
@@ -85,24 +84,15 @@ describe("decideStrategy", () => {
     const store = new InMemoryIngestionStore();
     const body = "exact body";
     const bodyHash = createHash("sha256").update(body).digest("hex");
-    const chunk: Chunk = {
-      path: "Existing/Note.md",
-      ord: 0,
-      headingPath: [],
-      text: body,
-      textForEmbed: body,
-      tokenCount: 2,
-      contentHash: bodyHash,
-    };
     await store.upsert(
       {
         path: "Existing/Note.md",
         contentHash: "x",
-        bodyHash: "x",
+        bodyHash,
         mtime: 0,
         frontmatter: null,
       },
-      [chunk],
+      [],
     );
 
     const result = await decideStrategy(spec(body), {

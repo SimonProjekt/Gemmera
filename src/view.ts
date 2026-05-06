@@ -165,7 +165,7 @@ export class GemmeraChatView extends ItemView {
     await this.runChat(text, intent, turnId);
   }
 
-  private async runCapture(text: string, _turnId: string): Promise<void> {
+  private async runCapture(text: string, turnId: string): Promise<void> {
     this.appendMessage("user", text);
     try {
       const outcome = await runIngest(
@@ -179,6 +179,8 @@ export class GemmeraChatView extends ItemView {
           writer: this.services.ingestWriter,
           jobQueue: this.services.jobQueue,
           preview: (preview) => openIngestPreview(this.app, preview),
+          eventLog: this.services.eventLog,
+          turnId,
           inboxFolder: this.settings.inboxFolder,
           dedupThreshold: this.settings.dedupThreshold,
           alwaysPreview: this.settings.alwaysPreview,
@@ -306,7 +308,15 @@ export class GemmeraChatView extends ItemView {
             cancelled: false,
           }),
         );
-        await this.runChat(resolution.text, chosenLabel, resolution.turnId);
+        if (chosenLabel === "capture") {
+          await this.runCapture(resolution.text, resolution.turnId);
+          this.recentTurns = [
+            ...this.recentTurns.slice(-2),
+            { text: resolution.text, intent: "capture" },
+          ];
+        } else {
+          await this.runChat(resolution.text, chosenLabel, resolution.turnId);
+        }
       }
     }
 

@@ -69,4 +69,12 @@ export class InMemoryIngestionStore implements IngestionStore {
     }
     return out;
   }
+
+  async findByBodyHash(hash: string): Promise<string[]> {
+    const out: string[] = [];
+    for (const state of this.notes.values()) {
+      if (state.bodyHash === hash) out.push(state.path);
+    }
+    return out;
+  }
 }

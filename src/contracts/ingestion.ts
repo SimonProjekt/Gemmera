@@ -101,6 +101,13 @@ export interface IngestionStore {
 
   /** Write a runtime metadata value. Persisted alongside note state. */
   setMeta<K extends keyof IngestionMeta>(key: K, value: IngestionMeta[K]): Promise<void>;
+
+  /**
+   * Find note paths whose stored `bodyHash` matches `hash`. Used by the
+   * ingest tool loop (#13) to short-circuit exact-content duplicates
+   * without paying for an LLM call. Returns `[]` for no match.
+   */
+  findByBodyHash(hash: string): Promise<string[]>;
 }
 
 export interface IngestionPipeline {

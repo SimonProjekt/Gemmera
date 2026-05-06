@@ -46,12 +46,15 @@ export async function decideStrategy(
   const threshold = deps.dedupThreshold ?? DEFAULT_DEDUP_THRESHOLD;
   const topK = deps.topK ?? 5;
 
-  // 1. Exact-hash dedup short-circuit.
+  // 1. Exact-hash dedup short-circuit. The pipeline stores `bodyHash =
+  //    sha256(body_after_frontmatter_strip)` per note, so hashing the
+  //    candidate body the same way matches existing notes whose body is
+  //    byte-identical regardless of frontmatter or chunk boundaries.
   const bodyHash = sha256(spec.body_markdown);
-  const exactMatches = await deps.store.getChunksByHash(bodyHash);
+  const exactMatches = await deps.store.findByBodyHash(bodyHash);
   if (exactMatches.length > 0) {
     return {
-      strategy: { kind: "dedup_ask", target: exactMatches[0].path, similarity: 1 },
+      strategy: { kind: "dedup_ask", target: exactMatches[0], similarity: 1 },
       topHits: [],
     };
   }

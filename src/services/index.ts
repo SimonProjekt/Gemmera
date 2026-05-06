@@ -36,7 +36,8 @@ import { RunnerStatus } from "./runner-status";
 import { RunnerControls } from "./runner-controls";
 import { ScheduledReconciler } from "./scheduled-reconciler";
 import { IngestWriter } from "./ingest-writer";
-import type { Retriever } from "../contracts";
+import { InMemoryEventLog } from "./event-log";
+import type { EventLog, Retriever } from "../contracts";
 
 /**
  * Cold-vault stand-in retriever. Returns no hits — used until the hybrid
@@ -67,6 +68,7 @@ export interface Services {
   scheduledReconciler: ScheduledReconciler;
   ingestWriter: IngestWriter;
   retriever: Retriever;
+  eventLog: EventLog;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -177,6 +179,7 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     scheduledReconciler,
     ingestWriter: new IngestWriter(vault),
     retriever: new EmptyRetriever(),
+    eventLog: new InMemoryEventLog(),
   };
 }
 

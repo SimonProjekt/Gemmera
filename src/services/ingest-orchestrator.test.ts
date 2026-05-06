@@ -7,7 +7,6 @@ import { IngestWriter } from "./ingest-writer";
 import { runIngest, type PreviewDecision, type PreviewHandler } from "./ingest-orchestrator";
 import type {
   ChatOptions,
-  Chunk,
   LLMReachability,
   LLMResponse,
   LLMService,
@@ -61,16 +60,16 @@ function setup(opts: {
   vaultFiles?: Record<string, string>;
   retrieverHits?: RetrievalHit[];
   preview: PreviewHandler;
-  storeChunks?: Array<{ path: string; chunk: Chunk }>;
+  /** Seed an existing note with the given body hash for dedup tests. */
+  storeNotes?: Array<{ path: string; bodyHash: string }>;
 }) {
   const vault = new MockVaultService(opts.vaultFiles ?? {});
   const store = new InMemoryIngestionStore();
-  if (opts.storeChunks) {
-    for (const { path, chunk } of opts.storeChunks) {
-      // upsert one note per chunk
+  if (opts.storeNotes) {
+    for (const { path, bodyHash } of opts.storeNotes) {
       store.upsert(
-        { path, contentHash: "x", bodyHash: "x", mtime: 0, frontmatter: null },
-        [chunk],
+        { path, contentHash: bodyHash, bodyHash, mtime: 0, frontmatter: null },
+        [],
       );
     }
   }
@@ -121,15 +120,6 @@ describe("runIngest", () => {
   it("dedup_ask: exact-hash duplicate routes to preview, append choice writes to existing", async () => {
     const body = "# Decisions\n\nWe ship v2.";
     const bodyHash = createHash("sha256").update(body).digest("hex");
-    const chunk: Chunk = {
-      path: "Existing/standup.md",
-      ord: 0,
-      headingPath: [],
-      text: body,
-      textForEmbed: body,
-      tokenCount: 5,
-      contentHash: bodyHash,
-    };
 
     let askedKind = "";
     const handler: PreviewHandler = async (p) => {
@@ -138,7 +128,7 @@ describe("runIngest", () => {
     };
     const { deps, vault, queue } = setup({
       vaultFiles: { "Existing/standup.md": "# Existing\n\n" },
-      storeChunks: [{ path: "Existing/standup.md", chunk }],
+      storeNotes: [{ path: "Existing/standup.md", bodyHash }],
       preview: handler,
     });
 
@@ -158,18 +148,9 @@ describe("runIngest", () => {
   it("dedup_ask: save_anyway turns into create with the matched path linked", async () => {
     const body = "# Decisions\n\nWe ship v2.";
     const bodyHash = createHash("sha256").update(body).digest("hex");
-    const chunk: Chunk = {
-      path: "Existing/standup.md",
-      ord: 0,
-      headingPath: [],
-      text: body,
-      textForEmbed: body,
-      tokenCount: 5,
-      contentHash: bodyHash,
-    };
     const handler: PreviewHandler = async () => ({ action: "dedup_choice", choice: "save_anyway" });
     const { deps, vault } = setup({
-      storeChunks: [{ path: "Existing/standup.md", chunk }],
+      storeNotes: [{ path: "Existing/standup.md", bodyHash }],
       preview: handler,
     });
 
@@ -218,4 +199,26 @@ describe("runIngest", () => {
     const result = await runIngest({ text: "   " }, deps);
     expect(result.kind).toBe("cancelled");
   });
+
+  it("emits an event-log entry for every orchestrator phase (issue #13 acceptance)", async () => {
+    const { deps } = setup({ preview: autoConfirm });
+    const eventLog = new InMemoryEventLog();
+    const turnId = "test-turn-1";
+    const result = await runIngest(
+      { text: "Q2 standup notes" },
+      { ...deps, eventLog, turnId },
+    );
+    expect(result.kind).toBe("saved");
+    const entries = await eventLog.eventsFor(turnId);
+    const states = entries.map((e) => e.state);
+    expect(states).toContain("PARSE_CONTENT");
+    expect(states).toContain("SEARCH_SIMILAR");
+    expect(states).toContain("DECIDE_STRATEGY");
+    expect(states).toContain("PREVIEW");
+    expect(states).toContain("WRITE");
+    expect(states).toContain("UPDATE_INDEX");
+    expect(states).toContain("DONE");
+  });
 });
+
+import { InMemoryEventLog } from "./event-log";
