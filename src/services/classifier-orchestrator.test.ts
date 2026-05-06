@@ -486,3 +486,16 @@ describe("classifyTurn — full pipeline integration", () => {
     expect(result.label).toBe("ask");
   });
 });
+
+describe("classifyTurn — disambiguation chip 250 ms budget", () => {
+  it("full pipeline completes well within 250 ms on a warm mock LLM", async () => {
+    const deps = makeDeps({ llm: makeJsonLLM(validJson("capture", 0.5)) });
+    const start = performance.now();
+    const result = await classifyTurn(makeInput(), deps, "turn-perf");
+    const elapsed = performance.now() - start;
+    // The chip must render within 250 ms of the classifier returning.
+    // With a synchronous mock LLM the budget should be < 50 ms.
+    expect(elapsed).toBeLessThan(250);
+    expect(result.needsDisambiguation).toBe(true);
+  });
+});
