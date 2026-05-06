@@ -243,8 +243,11 @@ export class GemmeraChatView extends ItemView {
       if (cancelled) {
         await this.services.classifierEventWriter.writeDisambiguation(
           toDisambiguationRow(cancelled.turnId, {
-            originalLabel: cancelled.originalDecision.output?.label ?? "ask",
-            originalConfidence: cancelled.originalDecision.output?.confidence ?? 0,
+            // null when the original decision was a fallback (no model output).
+            // Defaulting to "ask" here would mislabel fallback rows as model-
+            // emitted "ask" corrections in the eval golden set.
+            originalLabel: cancelled.originalDecision.output?.label ?? null,
+            originalConfidence: cancelled.originalDecision.output?.confidence ?? null,
             chosenLabel: null,
             cancelled: true,
           }),
@@ -256,8 +259,8 @@ export class GemmeraChatView extends ItemView {
         const chosenLabel: IntentLabel = action === "save" ? "capture" : "ask";
         await this.services.classifierEventWriter.writeDisambiguation(
           toDisambiguationRow(resolution.turnId, {
-            originalLabel: resolution.originalDecision.output?.label ?? "ask",
-            originalConfidence: resolution.originalDecision.output?.confidence ?? 0,
+            originalLabel: resolution.originalDecision.output?.label ?? null,
+            originalConfidence: resolution.originalDecision.output?.confidence ?? null,
             chosenLabel,
             cancelled: false,
           }),

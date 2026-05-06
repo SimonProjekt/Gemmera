@@ -154,12 +154,19 @@ export interface ClassifierDecisionRow {
 /**
  * Row written to the `classifier_disambiguation` table when the user
  * corrects a low-confidence classification via the disambiguation chip.
+ *
+ * `original_label` and `original_confidence` are nullable because the chip
+ * also fires on fallback decisions (timeout / unparseable / invalid-label /
+ * invalid-confidence) where the model emitted no usable output. For those
+ * rows the original-side is null; the fallback reason can be joined from
+ * `classifier_decision.fallback_reason` via `turn_id`. Eval queries that
+ * count "model-vs-user" corrections should filter `original_label IS NOT NULL`.
  */
 export interface ClassifierDisambiguationRow {
   turn_id: string;
   ts: number;
-  original_label: IntentLabel;
-  original_confidence: number;
+  original_label: IntentLabel | null;
+  original_confidence: number | null;
   /** The label the user chose, or null when they cancelled. */
   chosen_label: IntentLabel | null;
   /** True when the user dismissed the chip without choosing a label. */

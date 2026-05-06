@@ -45,6 +45,19 @@ describe("classifier DDL", () => {
     }
   });
 
+  it("classifier_disambiguation original_label and original_confidence are nullable", () => {
+    // Fallback decisions (no model output) must still be writable with
+    // null on the original-side. Asserting via the absence of NOT NULL
+    // on those two columns guards against an accidental tightening.
+    const lines = CLASSIFIER_DISAMBIGUATION_DDL.split("\n");
+    const labelLine = lines.find((l) => /\boriginal_label\b/.test(l));
+    const confLine = lines.find((l) => /\boriginal_confidence\b/.test(l));
+    expect(labelLine).toBeDefined();
+    expect(confLine).toBeDefined();
+    expect(labelLine).not.toContain("NOT NULL");
+    expect(confLine).not.toContain("NOT NULL");
+  });
+
   it("CLASSIFIER_DDL is ordered (decision before disambiguation)", () => {
     expect(CLASSIFIER_DDL).toHaveLength(2);
     expect(CLASSIFIER_DDL[0]).toContain("classifier_decision");
@@ -201,6 +214,23 @@ describe("toDisambiguationRow", () => {
     expect(row.original_confidence).toBe(0.52);
     expect(row.chosen_label).toBe("capture");
     expect(row.cancelled).toBe(false);
+  });
+
+  it("preserves null originalLabel and originalConfidence for fallback decisions", () => {
+    // The chip fires on classifier fallbacks (timeout / unparseable / etc.)
+    // where the model emitted no usable output. Those rows must store null
+    // on the original-side so eval queries can distinguish "model said X →
+    // user corrected" from "no model output → user picked something".
+    const row = toDisambiguationRow("turn-fallback", {
+      originalLabel: null,
+      originalConfidence: null,
+      chosenLabel: "capture",
+      cancelled: false,
+    });
+
+    expect(row.original_label).toBeNull();
+    expect(row.original_confidence).toBeNull();
+    expect(row.chosen_label).toBe("capture");
   });
 });
 
