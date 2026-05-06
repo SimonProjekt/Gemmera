@@ -94,6 +94,7 @@ export function toDecisionRow(
   return {
     turn_id: turnId,
     ts: Date.now(),
+<<<<<<< HEAD
     source: decision.source,
     skip_reason: decision.skipReason,
     prompt_version: decision.promptVersion,

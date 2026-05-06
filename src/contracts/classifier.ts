@@ -53,6 +53,30 @@ export interface ClassifierOutput {
   rationale: string;
 }
 
+// ─── Skip router ──────────────────────────────────────────────────────
+
+/** Known reason codes emitted when the classifier is short-circuited by a
+ *  hard signal.  These are stored in `skip_reason` / `skipReason` fields. */
+export type SkipReason =
+  | "empty-message"
+  | "attachment-only"
+  | "command-capture"
+  | "command-ask"
+  | "ctrl-enter"
+  | "leading-question-mark";
+
+/** Result of running the skip router. */
+export type SkipRouterResult =
+  | { kind: "error"; error: "empty-message" }
+  | { kind: "skip"; label: IntentLabel; reason: SkipReason; strippedText?: string }
+  | null;
+
+/** Commands that carry a preset intent and bypass the LLM classifier. */
+export type PresetCommand =
+  | "cowork.capture-selection"
+  | "cowork.capture-active-note"
+  | "cowork.ask-about-active-note";
+
 // ─── Decision log entry (upstream of #19 event-log schema) ────────────
 
 /** Source of a classifier decision. "skip" means a hard signal pre-empted
@@ -72,7 +96,7 @@ export interface ClassifierDecision {
    * Examples: "empty-message", "attachment-only", "command-capture",
    * "ctrl-enter", "leading-question-mark".
    */
-  skipReason: string | null;
+  skipReason: SkipReason | null;
 }
 
 // ─── Event-log rows (#19) ─────────────────────────────────────────────
@@ -86,7 +110,7 @@ export interface ClassifierDecisionRow {
   turn_id: string;
   ts: number;
   source: ClassifierSource;
-  skip_reason: string | null;
+  skip_reason: SkipReason | null;
   prompt_version: string;
   input_json: string;
   output_json: string | null;
