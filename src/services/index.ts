@@ -35,6 +35,17 @@ import { EmbeddingService } from "./embedding-service";
 import { RunnerStatus } from "./runner-status";
 import { RunnerControls } from "./runner-controls";
 import { ScheduledReconciler } from "./scheduled-reconciler";
+import { IngestWriter } from "./ingest-writer";
+import type { Retriever } from "../contracts";
+
+/**
+ * Cold-vault stand-in retriever. Returns no hits — used until the hybrid
+ * retriever (#8) is wired into the dev branch. The strategy step already
+ * tolerates an empty result and falls through to a `create` decision.
+ */
+class EmptyRetriever implements Retriever {
+  async retrieve() { return []; }
+}
 
 export interface Services {
   llm: LLMService;
@@ -54,6 +65,8 @@ export interface Services {
   runnerStatus: RunnerStatus;
   runnerControls: RunnerControls;
   scheduledReconciler: ScheduledReconciler;
+  ingestWriter: IngestWriter;
+  retriever: Retriever;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -162,6 +175,8 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     runnerStatus,
     runnerControls,
     scheduledReconciler,
+    ingestWriter: new IngestWriter(vault),
+    retriever: new EmptyRetriever(),
   };
 }
 
@@ -183,3 +198,10 @@ export { EmbeddingService } from "./embedding-service";
 export { RunnerStatus } from "./runner-status";
 export { RunnerControls } from "./runner-controls";
 export { ScheduledReconciler } from "./scheduled-reconciler";
+export { IngestWriter } from "./ingest-writer";
+export { runIngest } from "./ingest-orchestrator";
+export type {
+  IngestPreview,
+  PreviewDecision,
+  PreviewHandler,
+} from "./ingest-orchestrator";

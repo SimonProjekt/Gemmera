@@ -39,7 +39,10 @@ export default class GemmeraPlugin extends Plugin {
       ),
     );
 
-    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services));
+    this.registerView(
+      VIEW_TYPE,
+      (leaf) => new GemmeraChatView(leaf, this.services, this.settings),
+    );
 
     this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();

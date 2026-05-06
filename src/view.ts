@@ -1,12 +1,15 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { IntentLabel, RecentTurn, RouteDecision } from "./contracts/classifier";
 import type { Services } from "./services";
 import { parseFileOps, handleFileOps } from "./fileops";
 import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
+import { runIngest } from "./services/ingest-orchestrator";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
+import { openIngestPreview } from "./ui/ingest-preview-modal";
+import type { GemmeraSettings } from "./settings";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -23,7 +26,11 @@ export class GemmeraChatView extends ItemView {
   private recentTurns: RecentTurn[] = [];
   private pill: IndexingPill | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private readonly services: Services) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    private readonly services: Services,
+    private readonly settings: GemmeraSettings,
+  ) {
     super(leaf);
   }
 
@@ -144,8 +151,59 @@ export class GemmeraChatView extends ItemView {
       return;
     }
 
+    // ── Capture (#13) ─────────────────────────────────────────────────
+    const intent = forcedLabel ?? route?.label ?? "ask";
+    if (intent === "capture") {
+      await this.runCapture(text, turnId);
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "capture" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
     // ── Chat ──────────────────────────────────────────────────────────
-    await this.runChat(text, forcedLabel ?? route?.label ?? "ask", turnId);
+    await this.runChat(text, intent, turnId);
+  }
+
+  private async runCapture(text: string, _turnId: string): Promise<void> {
+    this.appendMessage("user", text);
+    try {
+      const outcome = await runIngest(
+        { text },
+        {
+          llm: this.services.llm,
+          promptLoader: this.services.promptLoader,
+          retriever: this.services.retriever,
+          store: this.services.ingestionStore,
+          vault: this.services.vault,
+          writer: this.services.ingestWriter,
+          jobQueue: this.services.jobQueue,
+          preview: (preview) => openIngestPreview(this.app, preview),
+          inboxFolder: this.settings.inboxFolder,
+          dedupThreshold: this.settings.dedupThreshold,
+          alwaysPreview: this.settings.alwaysPreview,
+        },
+      );
+      this.services.runnerStatus.recompute();
+
+      if (outcome.kind === "saved") {
+        const verb = outcome.mode === "append" ? "Appended to" : "Saved to";
+        new Notice(`Gemmera: ${verb} ${outcome.path}`);
+        this.appendMessage("assistant", `${verb} **${outcome.path}**`);
+      } else if (outcome.kind === "cancelled") {
+        this.appendMessage("assistant", "Cancelled.");
+      } else if (outcome.kind === "skipped_existing") {
+        new Notice(`Gemmera: already saved as ${outcome.path}`);
+        this.appendMessage("assistant", `Already in vault: **${outcome.path}**`);
+      } else {
+        this.appendMessage("assistant", `Capture failed: ${outcome.reason}`);
+      }
+    } catch (err) {
+      this.appendMessage(
+        "assistant",
+        `Capture failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+    }
   }
 
   private async runChat(text: string, intent: IntentLabel, turnId: string): Promise<void> {
