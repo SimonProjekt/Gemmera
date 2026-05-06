@@ -1,13 +1,17 @@
 import { join } from "path";
 import { FileSystemAdapter, Notice, type App } from "obsidian";
 import type {
+  BM25Index,
   IndexService,
   IngestionPipeline,
   IngestionStore,
   JobQueue,
   LLMService,
+  MutableLinksIndex,
   PathFilter,
+  PayloadAssembler,
   Reconciler,
+  Retriever,
   VaultService,
   VectorStore,
 } from "../contracts";
@@ -32,6 +36,12 @@ import { VaultReconciler } from "./vault-reconciler";
 import { BinaryVectorStore } from "./binary-vector-store";
 import { OllamaEmbedder } from "./ollama-embedder";
 import { EmbeddingService } from "./embedding-service";
+import { InMemoryBM25Index } from "./in-memory-bm25-index";
+import { BM25IndexService } from "./bm25-index-service";
+import { InMemoryLinksIndex } from "./in-memory-links-index";
+import { LinksIndexService } from "./links-index-service";
+import { HybridRetriever } from "./hybrid-retriever";
+import { DefaultPayloadAssembler } from "./payload-assembler";
 
 export interface Services {
   llm: LLMService;
@@ -46,6 +56,12 @@ export interface Services {
   reconciler: Reconciler;
   vectorStore: VectorStore;
   embeddingService: EmbeddingService;
+  bm25Index: BM25Index;
+  bm25IndexService: BM25IndexService;
+  linksIndex: MutableLinksIndex;
+  linksIndexService: LinksIndexService;
+  retriever: Retriever;
+  payloadAssembler: PayloadAssembler;
   promptLoader: PromptLoader;
   classifierEventWriter: ClassifierEventWriter;
 }
@@ -111,6 +127,19 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     ingestionStore,
   );
 
+  const bm25Index = new InMemoryBM25Index();
+  const bm25IndexService = new BM25IndexService(ingestionRunner, bm25Index, ingestionStore);
+  const linksIndex = new InMemoryLinksIndex();
+  const linksIndexService = new LinksIndexService(ingestionRunner, vault, linksIndex);
+  const retriever = new HybridRetriever(
+    embedder,
+    vectorStore,
+    bm25Index,
+    linksIndex,
+    ingestionStore,
+  );
+  const payloadAssembler = new DefaultPayloadAssembler(linksIndex);
+
   return {
     llm: await createLLMService(settings.llmBackend),
     vault,
@@ -124,6 +153,12 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     reconciler,
     vectorStore,
     embeddingService,
+    bm25Index,
+    bm25IndexService,
+    linksIndex,
+    linksIndexService,
+    retriever,
+    payloadAssembler,
     promptLoader: new FilePromptLoader(join(pluginDir, "prompts")),
     classifierEventWriter: new InMemoryClassifierEventWriter(),
   };
@@ -144,3 +179,9 @@ export { VaultReconciler } from "./vault-reconciler";
 export { BinaryVectorStore } from "./binary-vector-store";
 export { OllamaEmbedder } from "./ollama-embedder";
 export { EmbeddingService } from "./embedding-service";
+export { InMemoryBM25Index } from "./in-memory-bm25-index";
+export { BM25IndexService } from "./bm25-index-service";
+export { InMemoryLinksIndex } from "./in-memory-links-index";
+export { LinksIndexService } from "./links-index-service";
+export { HybridRetriever } from "./hybrid-retriever";
+export { DefaultPayloadAssembler } from "./payload-assembler";
