@@ -6,6 +6,7 @@ import { parseFileOps, handleFileOps } from "./fileops";
 import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
 import { DisambiguationChip } from "./disambiguation-chip";
+import { IndexingPill } from "./ui/indexing-pill";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -20,6 +21,7 @@ export class GemmeraChatView extends ItemView {
   private chip = new DisambiguationChip();
   private chipEl: HTMLElement | null = null;
   private recentTurns: RecentTurn[] = [];
+  private pill: IndexingPill | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly services: Services) {
     super(leaf);
@@ -42,9 +44,19 @@ export class GemmeraChatView extends ItemView {
     container.empty();
     container.addClass("gemmera-view");
 
-    const statusEl = container.createEl("div", { cls: "gemmera-status" });
+    const headerEl = container.createEl("div", { cls: "gemmera-header" });
+    const statusEl = headerEl.createEl("div", { cls: "gemmera-status" });
     this.checkOllamaStatus(statusEl);
     this.services.llm.pickDefaultModel().then((m) => { this.model = m; }).catch(() => {});
+
+    this.pill = new IndexingPill(this.services.runnerStatus);
+    this.pill.mount(headerEl, async () => {
+      if (this.services.runnerControls.isPaused()) {
+        await this.services.runnerControls.resume();
+      } else {
+        await this.services.runnerControls.pause();
+      }
+    });
 
     this.messagesEl = container.createEl("div", { cls: "gemmera-messages" });
 
@@ -67,7 +79,8 @@ export class GemmeraChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // cleanup if needed
+    this.pill?.unmount();
+    this.pill = null;
   }
 
   private async checkOllamaStatus(el: HTMLElement): Promise<void> {

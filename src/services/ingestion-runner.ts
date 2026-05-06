@@ -24,6 +24,7 @@ export class IngestionRunner {
   private unsubscribe: (() => void) | null = null;
   private inFlight: Promise<void> = Promise.resolve();
   private running = false;
+  private paused = false;
   private listeners = new Set<(e: RunnerEvent) => void>();
 
   constructor(
@@ -39,6 +40,20 @@ export class IngestionRunner {
     });
     // Pick up anything already pending at start time.
     if (this.queue.size() > 0) void this.kick();
+  }
+
+  /**
+   * Halt new job claims. In-flight jobs run to completion. While paused,
+   * arrivals enqueue but don't run; resume() re-kicks the loop.
+   */
+  setPaused(paused: boolean): void {
+    if (this.paused === paused) return;
+    this.paused = paused;
+    if (!paused && this.queue.size() > 0) void this.kick();
+  }
+
+  isPaused(): boolean {
+    return this.paused;
   }
 
   async stop(): Promise<void> {
@@ -73,9 +88,16 @@ export class IngestionRunner {
   private async processUntilEmpty(): Promise<void> {
     this.running = true;
     try {
-      while (this.queue.size() > 0) {
+      while (!this.paused && this.queue.size() > 0) {
         const jobs = this.queue.drain();
         for (const job of jobs) {
+          if (this.paused) {
+            // Re-queue jobs we drained but haven't started. Order is
+            // preserved because nothing else has run between drain and
+            // re-enqueue.
+            this.queue.enqueue(job);
+            continue;
+          }
           try {
             await this.runOne(job);
           } catch (error) {

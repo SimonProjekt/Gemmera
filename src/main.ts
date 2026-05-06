@@ -2,6 +2,7 @@ import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
+import { GemmeraSettingsTab } from "./ui/settings-tab";
 
 export default class GemmeraPlugin extends Plugin {
   private services!: Services;
@@ -14,11 +15,29 @@ export default class GemmeraPlugin extends Plugin {
     this.services.eventBridge.start();
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();
+    this.services.runnerStatus.start();
+    // Restore persisted pause flag before any work claims start.
+    await this.services.runnerControls.applyPersistedState();
     this.wireDebugLogs();
     // Fire reconcile in the background — hash gate keeps it cheap on warm reloads.
     this.services.reconciler
       .reconcile()
+      .then(() => this.services.runnerStatus.recompute())
       .catch((err) => console.error("[gemmera] reconcile failed", err));
+    // Schedule the weekly drift check (#15e). Runs immediately if overdue.
+    this.services.scheduledReconciler
+      .start()
+      .catch((err) => console.error("[gemmera] scheduled reconcile failed", err));
+
+    this.addSettingTab(
+      new GemmeraSettingsTab(
+        this.app,
+        this,
+        this.services.runnerControls,
+        this.services.scheduledReconciler,
+        this.services.ingestionStore,
+      ),
+    );
 
     this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services));
 
@@ -35,6 +54,8 @@ export default class GemmeraPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.services?.eventBridge.stop();
+    this.services?.runnerStatus.stop();
+    this.services?.scheduledReconciler.stop();
     if (this.services) {
       await this.services.ingestionRunner.stop();
       await this.services.embeddingService.stop();

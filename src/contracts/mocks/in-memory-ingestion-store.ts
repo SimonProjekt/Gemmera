@@ -1,9 +1,10 @@
 import type { Chunk } from "../chunker";
-import type { IngestionStore, NoteState } from "../ingestion";
+import type { IngestionMeta, IngestionStore, NoteState } from "../ingestion";
 
 export class InMemoryIngestionStore implements IngestionStore {
   private notes = new Map<string, NoteState>();
   private chunks = new Map<string, Chunk[]>();
+  private meta: Partial<IngestionMeta> = {};
 
   async get(path: string): Promise<NoteState | null> {
     return this.notes.get(path) ?? null;
@@ -48,6 +49,15 @@ export class InMemoryIngestionStore implements IngestionStore {
       }
     }
     return false;
+  }
+
+  async getMeta<K extends keyof IngestionMeta>(key: K): Promise<IngestionMeta[K] | null> {
+    const value = this.meta[key];
+    return value === undefined ? null : (value as IngestionMeta[K]);
+  }
+
+  async setMeta<K extends keyof IngestionMeta>(key: K, value: IngestionMeta[K]): Promise<void> {
+    this.meta[key] = value;
   }
 
   async getChunksByHash(contentHash: string): Promise<Chunk[]> {

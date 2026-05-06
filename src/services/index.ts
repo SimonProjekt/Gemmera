@@ -32,6 +32,9 @@ import { VaultReconciler } from "./vault-reconciler";
 import { BinaryVectorStore } from "./binary-vector-store";
 import { OllamaEmbedder } from "./ollama-embedder";
 import { EmbeddingService } from "./embedding-service";
+import { RunnerStatus } from "./runner-status";
+import { RunnerControls } from "./runner-controls";
+import { ScheduledReconciler } from "./scheduled-reconciler";
 
 export interface Services {
   llm: LLMService;
@@ -48,6 +51,9 @@ export interface Services {
   embeddingService: EmbeddingService;
   promptLoader: PromptLoader;
   classifierEventWriter: ClassifierEventWriter;
+  runnerStatus: RunnerStatus;
+  runnerControls: RunnerControls;
+  scheduledReconciler: ScheduledReconciler;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -87,13 +93,40 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     );
   }
   const ingestionStore = new JsonIngestionStore(adapter.getFullPath(STATE_PATH));
+  // Closure capture: RunnerControls bumps `meta.rebuildEpoch`; the pipeline
+  // reads it on every ingest. We can't `await` here, so we stash the latest
+  // value in a process-local cell and refresh on every meta write below.
+  const epochCell = { value: 0 };
   const ingestionPipeline = new HashGatedIngestionPipeline(
     vault,
     new MarkdownChunker(),
     ingestionStore,
+    () => epochCell.value,
   );
   const ingestionRunner = new IngestionRunner(jobQueue, ingestionPipeline, ingestionStore);
   const reconciler = new VaultReconciler(vault, ingestionStore, jobQueue, pathFilter);
+  const runnerStatus = new RunnerStatus(jobQueue, ingestionRunner);
+  const runnerControls = new RunnerControls(
+    ingestionRunner,
+    runnerStatus,
+    ingestionStore,
+    reconciler,
+    jobQueue,
+  );
+  const scheduledReconciler = new ScheduledReconciler({
+    vault,
+    store: ingestionStore,
+    reconciler,
+  });
+  // Seed the epoch cell from persisted meta so rebuilds survive reload.
+  epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? 0;
+  // Re-read after rebuild so the pipeline's hash gate sees the new epoch.
+  const origRebuild = runnerControls.rebuild.bind(runnerControls);
+  runnerControls.rebuild = async () => {
+    const result = await origRebuild();
+    epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? epochCell.value;
+    return result;
+  };
   const vectorStore = new BinaryVectorStore(
     adapter.getFullPath(VECTORS_BIN_PATH),
     adapter.getFullPath(VECTORS_JSON_PATH),
@@ -126,6 +159,9 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     embeddingService,
     promptLoader: new FilePromptLoader(join(pluginDir, "prompts")),
     classifierEventWriter: new InMemoryClassifierEventWriter(),
+    runnerStatus,
+    runnerControls,
+    scheduledReconciler,
   };
 }
 
@@ -144,3 +180,6 @@ export { VaultReconciler } from "./vault-reconciler";
 export { BinaryVectorStore } from "./binary-vector-store";
 export { OllamaEmbedder } from "./ollama-embedder";
 export { EmbeddingService } from "./embedding-service";
+export { RunnerStatus } from "./runner-status";
+export { RunnerControls } from "./runner-controls";
+export { ScheduledReconciler } from "./scheduled-reconciler";
