@@ -167,9 +167,9 @@ export class GemmeraSettingsTab extends PluginSettingTab {
         "When off, high-confidence creates skip the preview modal. Append and dedup-ask always preview.",
       )
       .addToggle((toggle: { setValue: (v: boolean) => unknown; onChange: (cb: (v: boolean) => void) => unknown }) => {
-        toggle.setValue(this.settings.alwaysPreview);
+        toggle.setValue(this.settings.alwaysPreviewBeforeSave);
         toggle.onChange(async (value: boolean) => {
-          this.settings.alwaysPreview = value;
+          this.settings.alwaysPreviewBeforeSave = value;
           await this.saveSettings();
         });
       });
