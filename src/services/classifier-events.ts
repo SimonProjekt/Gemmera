@@ -94,9 +94,8 @@ export function toDecisionRow(
   return {
     turn_id: turnId,
     ts: Date.now(),
-<<<<<<< HEAD
     source: decision.source,
-    skip_reason: decision.skipReason,
+    skip_reason: decision.skipReason as ClassifierDecisionRow["skip_reason"],
     prompt_version: decision.promptVersion,
     input_json: JSON.stringify(decision.input),
     output_json: decision.output ? JSON.stringify(decision.output) : null,
