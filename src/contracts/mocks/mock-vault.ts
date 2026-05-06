@@ -1,8 +1,9 @@
-import type { HeadingRef, VaultFileRef, VaultService } from "../vault";
+import type { HeadingRef, VaultFileRef, VaultService, VaultStat } from "../vault";
 
 export class MockVaultService implements VaultService {
   private files = new Map<string, string>();
   private headings = new Map<string, HeadingRef[]>();
+  private mtimes = new Map<string, number>();
 
   constructor(initial: Record<string, string> = {}) {
     for (const [path, content] of Object.entries(initial)) {
@@ -44,6 +45,16 @@ export class MockVaultService implements VaultService {
 
   async getHeadings(path: string): Promise<HeadingRef[]> {
     return this.headings.get(path) ?? [];
+  }
+
+  async stat(path: string): Promise<VaultStat> {
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`File not found: ${path}`);
+    return { mtime: this.mtimes.get(path) ?? 0, size: content.length };
+  }
+
+  setMtime(path: string, mtime: number): void {
+    this.mtimes.set(path, mtime);
   }
 
   setHeadings(path: string, headings: HeadingRef[] | string[]): void {

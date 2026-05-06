@@ -1,14 +1,15 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Chunk, IngestionStore, NoteState } from "../contracts";
+import type { Chunk, IngestionMeta, IngestionStore, NoteState } from "../contracts";
 
 interface StoreShape {
   version: 1;
   notes: Record<string, NoteState>;
   chunks: Record<string, Chunk[]>;
+  meta: Partial<IngestionMeta>;
 }
 
-const EMPTY: StoreShape = { version: 1, notes: {}, chunks: {} };
+const EMPTY: StoreShape = { version: 1, notes: {}, chunks: {}, meta: {} };
 
 /**
  * JSON-backed ingestion store. Single file, full-rewrite on each upsert via
@@ -78,6 +79,18 @@ export class JsonIngestionStore implements IngestionStore {
     return false;
   }
 
+  async getMeta<K extends keyof IngestionMeta>(key: K): Promise<IngestionMeta[K] | null> {
+    const data = await this.load();
+    const value = data.meta[key];
+    return value === undefined ? null : (value as IngestionMeta[K]);
+  }
+
+  async setMeta<K extends keyof IngestionMeta>(key: K, value: IngestionMeta[K]): Promise<void> {
+    const data = await this.load();
+    data.meta[key] = value;
+    await this.flush(data);
+  }
+
   async getChunksByHash(contentHash: string): Promise<Chunk[]> {
     const data = await this.load();
     const out: Chunk[] = [];
@@ -85,6 +98,15 @@ export class JsonIngestionStore implements IngestionStore {
       for (const c of chunks) {
         if (c.contentHash === contentHash) out.push(c);
       }
+    }
+    return out;
+  }
+
+  async findByBodyHash(hash: string): Promise<string[]> {
+    const data = await this.load();
+    const out: string[] = [];
+    for (const [path, state] of Object.entries(data.notes)) {
+      if (state.bodyHash === hash) out.push(path);
     }
     return out;
   }
@@ -98,10 +120,11 @@ export class JsonIngestionStore implements IngestionStore {
         version: 1,
         notes: parsed.notes ?? {},
         chunks: parsed.chunks ?? {},
+        meta: parsed.meta ?? {},
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      this.cache = { ...EMPTY, notes: {}, chunks: {} };
+      this.cache = { ...EMPTY, notes: {}, chunks: {}, meta: {} };
     }
     return this.cache;
   }

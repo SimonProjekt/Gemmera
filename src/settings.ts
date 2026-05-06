@@ -10,20 +10,28 @@ export interface GemmeraSettings {
   /**
    * Show classifier label + confidence + rationale inline on every message.
    * Wired to Settings → Advanced → "Show classifier decisions" (#67).
-   * Until that tab lands, toggle by editing `data.json`.
    */
   showClassifierDecisions: boolean;
 
   /**
-   * When true, the user reviews a capture before it is written.
-   * When false, captures are silent and the silent-save indicator is shown.
-   * Wired to Settings → "Always preview before save" (#67).
+   * When true, captures pass through a preview modal before being written.
+   * When false, high-confidence creates are saved silently and the
+   * silent-save indicator is shown. Wired to Settings → "Always preview
+   * before save" (#67).
    */
   alwaysPreviewBeforeSave: boolean;
+
+  /** Folder for new ingest notes. Default `Inbox/`. */
+  inboxFolder: string;
+
+  /** Cosine score above which a similar note is treated as a near-duplicate. */
+  dedupThreshold: number;
 }
 
 export const DEFAULT_SETTINGS: GemmeraSettings = {
   llmBackend: "ollama",
   showClassifierDecisions: false,
-  alwaysPreviewBeforeSave: false,
+  alwaysPreviewBeforeSave: true,
+  inboxFolder: "Inbox/",
+  dedupThreshold: 0.85,
 };

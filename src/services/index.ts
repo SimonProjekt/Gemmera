@@ -32,6 +32,33 @@ import { VaultReconciler } from "./vault-reconciler";
 import { BinaryVectorStore } from "./binary-vector-store";
 import { OllamaEmbedder } from "./ollama-embedder";
 import { EmbeddingService } from "./embedding-service";
+import { RunnerStatus } from "./runner-status";
+import { RunnerControls } from "./runner-controls";
+import { ScheduledReconciler } from "./scheduled-reconciler";
+import { IngestWriter } from "./ingest-writer";
+import { InMemoryEventLog } from "./event-log";
+import type { EventLog, Retriever } from "../contracts";
+
+/**
+ * Cold-vault stand-in retriever. Returns no hits — used until the hybrid
+ * retriever (#8) is wired into the dev branch. The strategy step tolerates
+ * an empty result and falls through to a `create` decision.
+ *
+ * TODO(#8): replace with HybridRetriever once the wiring branch lands.
+ */
+class EmptyRetriever implements Retriever {
+  private warned = false;
+  async retrieve(): Promise<[]> {
+    if (!this.warned) {
+      this.warned = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[gemmera] retriever stub — similarity-based dedup is disabled until #8 lands",
+      );
+    }
+    return [];
+  }
+}
 
 export interface Services {
   llm: LLMService;
@@ -48,6 +75,12 @@ export interface Services {
   embeddingService: EmbeddingService;
   promptLoader: PromptLoader;
   classifierEventWriter: ClassifierEventWriter;
+  runnerStatus: RunnerStatus;
+  runnerControls: RunnerControls;
+  scheduledReconciler: ScheduledReconciler;
+  ingestWriter: IngestWriter;
+  retriever: Retriever;
+  eventLog: EventLog;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -87,13 +120,40 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     );
   }
   const ingestionStore = new JsonIngestionStore(adapter.getFullPath(STATE_PATH));
+  // Closure capture: RunnerControls bumps `meta.rebuildEpoch`; the pipeline
+  // reads it on every ingest. We can't `await` here, so we stash the latest
+  // value in a process-local cell and refresh on every meta write below.
+  const epochCell = { value: 0 };
   const ingestionPipeline = new HashGatedIngestionPipeline(
     vault,
     new MarkdownChunker(),
     ingestionStore,
+    () => epochCell.value,
   );
   const ingestionRunner = new IngestionRunner(jobQueue, ingestionPipeline, ingestionStore);
   const reconciler = new VaultReconciler(vault, ingestionStore, jobQueue, pathFilter);
+  const runnerStatus = new RunnerStatus(jobQueue, ingestionRunner);
+  const runnerControls = new RunnerControls(
+    ingestionRunner,
+    runnerStatus,
+    ingestionStore,
+    reconciler,
+    jobQueue,
+  );
+  const scheduledReconciler = new ScheduledReconciler({
+    vault,
+    store: ingestionStore,
+    reconciler,
+  });
+  // Seed the epoch cell from persisted meta so rebuilds survive reload.
+  epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? 0;
+  // Re-read after rebuild so the pipeline's hash gate sees the new epoch.
+  const origRebuild = runnerControls.rebuild.bind(runnerControls);
+  runnerControls.rebuild = async () => {
+    const result = await origRebuild();
+    epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? epochCell.value;
+    return result;
+  };
   const vectorStore = new BinaryVectorStore(
     adapter.getFullPath(VECTORS_BIN_PATH),
     adapter.getFullPath(VECTORS_JSON_PATH),
@@ -126,6 +186,12 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     embeddingService,
     promptLoader: new FilePromptLoader(join(pluginDir, "prompts")),
     classifierEventWriter: new InMemoryClassifierEventWriter(),
+    runnerStatus,
+    runnerControls,
+    scheduledReconciler,
+    ingestWriter: new IngestWriter(vault),
+    retriever: new EmptyRetriever(),
+    eventLog: new InMemoryEventLog(),
   };
 }
 
@@ -144,3 +210,13 @@ export { VaultReconciler } from "./vault-reconciler";
 export { BinaryVectorStore } from "./binary-vector-store";
 export { OllamaEmbedder } from "./ollama-embedder";
 export { EmbeddingService } from "./embedding-service";
+export { RunnerStatus } from "./runner-status";
+export { RunnerControls } from "./runner-controls";
+export { ScheduledReconciler } from "./scheduled-reconciler";
+export { IngestWriter } from "./ingest-writer";
+export { runIngest } from "./ingest-orchestrator";
+export type {
+  IngestPreview,
+  PreviewDecision,
+  PreviewHandler,
+} from "./ingest-orchestrator";

@@ -14,14 +14,26 @@ export class HashGatedIngestionPipeline implements IngestionPipeline {
     private readonly vault: VaultService,
     private readonly chunker: Chunker,
     private readonly store: IngestionStore,
+    /**
+     * Returns the current rebuild epoch (#15d). When a note's `lastEpoch`
+     * is below this value, the hash gate is bypassed so the rebuild can
+     * re-stamp it. Defaults to 0 — backward-compatible with callers that
+     * haven't wired the controls service yet.
+     */
+    private readonly currentEpoch: () => number = () => 0,
   ) {}
 
   async ingest(path: string, opts: IngestOptions = {}): Promise<IngestDecision> {
     const raw = await this.vault.read(path);
     const contentHash = sha256(raw);
+    const epoch = this.currentEpoch();
 
     const prior = await this.store.get(path);
-    if (prior && prior.contentHash === contentHash) {
+    if (
+      prior &&
+      prior.contentHash === contentHash &&
+      (prior.lastEpoch ?? 0) >= epoch
+    ) {
       return { kind: "skip", state: prior };
     }
 
@@ -35,6 +47,7 @@ export class HashGatedIngestionPipeline implements IngestionPipeline {
       bodyHash,
       mtime,
       frontmatter,
+      lastEpoch: epoch,
     };
 
     if (prior && prior.bodyHash === bodyHash) {
