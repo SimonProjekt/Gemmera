@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
@@ -9,7 +9,8 @@ export default class GemmeraPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this.services = await createServices(this.app, this.settings);
+    const pluginDir = (this.app.vault.adapter as FileSystemAdapter).getFullPath(this.manifest.dir ?? ".obsidian/plugins/gemmera");
+    this.services = await createServices(this.app, this.settings, pluginDir);
     this.services.eventBridge.start();
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();

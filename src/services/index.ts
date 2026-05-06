@@ -1,3 +1,4 @@
+import { join } from "path";
 import { FileSystemAdapter, Notice, type App } from "obsidian";
 import type {
   IndexService,
@@ -10,9 +11,13 @@ import type {
   VaultService,
   VectorStore,
 } from "../contracts";
+import type { ClassifierEventWriter } from "../contracts/classifier";
+import type { PromptLoader } from "../contracts/prompts";
 import type { GemmeraSettings } from "../settings";
 import { MockLLMService } from "./mock-llm";
 import { OllamaLLMService } from "./ollama-llm";
+import { FilePromptLoader } from "./file-prompt-loader";
+import { InMemoryClassifierEventWriter } from "./classifier-events";
 import { ObsidianVaultService } from "./real-vault";
 import { VaultLinearIndexService } from "./vault-index";
 import { InMemoryJobQueue } from "./in-memory-job-queue";
@@ -41,6 +46,8 @@ export interface Services {
   reconciler: Reconciler;
   vectorStore: VectorStore;
   embeddingService: EmbeddingService;
+  promptLoader: PromptLoader;
+  classifierEventWriter: ClassifierEventWriter;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -63,7 +70,7 @@ export async function createLLMService(
   return ollama;
 }
 
-export async function createServices(app: App, settings: GemmeraSettings): Promise<Services> {
+export async function createServices(app: App, settings: GemmeraSettings, pluginDir: string): Promise<Services> {
   const vault = new ObsidianVaultService(app);
   const jobQueue = new InMemoryJobQueue();
   const pathFilter = new DefaultPathFilter();
@@ -117,6 +124,8 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
     reconciler,
     vectorStore,
     embeddingService,
+    promptLoader: new FilePromptLoader(join(pluginDir, "prompts")),
+    classifierEventWriter: new InMemoryClassifierEventWriter(),
   };
 }
 
