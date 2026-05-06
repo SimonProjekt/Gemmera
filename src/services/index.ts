@@ -40,6 +40,12 @@ import { InMemoryLinksIndex } from "./in-memory-links-index";
 import { LinksIndexService } from "./links-index-service";
 import { HybridRetriever } from "./hybrid-retriever";
 import { DefaultPayloadAssembler } from "./payload-assembler";
+import { RunnerStatus } from "./runner-status";
+import { RunnerControls } from "./runner-controls";
+import { ScheduledReconciler } from "./scheduled-reconciler";
+import { IngestWriter } from "./ingest-writer";
+import { InMemoryEventLog } from "./event-log";
+import type { EventLog } from "../contracts";
 
 export interface Services {
   llm: LLMService;
@@ -60,6 +66,11 @@ export interface Services {
   payloadAssembler: PayloadAssembler;
   promptLoader: PromptLoader;
   classifierEventWriter: ClassifierEventWriter;
+  runnerStatus: RunnerStatus;
+  runnerControls: RunnerControls;
+  scheduledReconciler: ScheduledReconciler;
+  ingestWriter: IngestWriter;
+  eventLog: EventLog;
 }
 
 const STATE_PATH = ".coworkmd/state.json";
@@ -99,13 +110,37 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     );
   }
   const ingestionStore = new JsonIngestionStore(adapter.getFullPath(STATE_PATH));
+  // Closure cell so the synchronous epoch source the pipeline reads can be
+  // refreshed after async rebuilds. RunnerControls calls `onRebuild` once
+  // the new epoch is in store meta; the hook below refreshes the cell so
+  // the pipeline's hash gate sees the bump on the next ingest.
+  const epochCell = { value: (await ingestionStore.getMeta("rebuildEpoch")) ?? 0 };
   const ingestionPipeline = new HashGatedIngestionPipeline(
     vault,
     new MarkdownChunker(),
     ingestionStore,
+    () => epochCell.value,
   );
   const ingestionRunner = new IngestionRunner(jobQueue, ingestionPipeline, ingestionStore);
   const reconciler = new VaultReconciler(vault, ingestionStore, jobQueue, pathFilter);
+  const runnerStatus = new RunnerStatus(jobQueue, ingestionRunner);
+  const runnerControls = new RunnerControls(
+    ingestionRunner,
+    runnerStatus,
+    ingestionStore,
+    reconciler,
+    jobQueue,
+    {
+      onRebuild: async () => {
+        epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? epochCell.value;
+      },
+    },
+  );
+  const scheduledReconciler = new ScheduledReconciler({
+    vault,
+    store: ingestionStore,
+    reconciler,
+  });
   const vectorStore = new BinaryVectorStore(
     adapter.getFullPath(VECTORS_BIN_PATH),
     adapter.getFullPath(VECTORS_JSON_PATH),
@@ -155,6 +190,11 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     payloadAssembler,
     promptLoader: new FilePromptLoader(join(pluginDir, "prompts")),
     classifierEventWriter: new InMemoryClassifierEventWriter(),
+    runnerStatus,
+    runnerControls,
+    scheduledReconciler,
+    ingestWriter: new IngestWriter(vault),
+    eventLog: new InMemoryEventLog(),
   };
 }
 
@@ -179,3 +219,13 @@ export { InMemoryLinksIndex } from "./in-memory-links-index";
 export { LinksIndexService } from "./links-index-service";
 export { HybridRetriever } from "./hybrid-retriever";
 export { DefaultPayloadAssembler } from "./payload-assembler";
+export { RunnerStatus } from "./runner-status";
+export { RunnerControls } from "./runner-controls";
+export { ScheduledReconciler } from "./scheduled-reconciler";
+export { IngestWriter } from "./ingest-writer";
+export { runIngest } from "./ingest-orchestrator";
+export type {
+  IngestPreview,
+  PreviewDecision,
+  PreviewHandler,
+} from "./ingest-orchestrator";

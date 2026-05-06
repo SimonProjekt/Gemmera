@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { IntentLabel, RecentTurn, RouteDecision } from "./contracts/classifier";
 import type { Services } from "./services";
@@ -6,7 +6,10 @@ import type { GemmeraSettings } from "./settings";
 import { parseFileOps, handleFileOps } from "./fileops";
 import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
+import { runIngest } from "./services/ingest-orchestrator";
 import { DisambiguationChip } from "./disambiguation-chip";
+import { IndexingPill } from "./ui/indexing-pill";
+import { openIngestPreview } from "./ui/ingest-preview-modal";
 import { buildMessageDecoration } from "./message-decoration";
 
 export const VIEW_TYPE = "gemmera-chat";
@@ -22,6 +25,7 @@ export class GemmeraChatView extends ItemView {
   private chip = new DisambiguationChip();
   private chipEl: HTMLElement | null = null;
   private recentTurns: RecentTurn[] = [];
+  private pill: IndexingPill | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -48,9 +52,19 @@ export class GemmeraChatView extends ItemView {
     container.empty();
     container.addClass("gemmera-view");
 
-    const statusEl = container.createEl("div", { cls: "gemmera-status" });
+    const headerEl = container.createEl("div", { cls: "gemmera-header" });
+    const statusEl = headerEl.createEl("div", { cls: "gemmera-status" });
     this.checkOllamaStatus(statusEl);
     this.services.llm.pickDefaultModel().then((m) => { this.model = m; }).catch(() => {});
+
+    this.pill = new IndexingPill(this.services.runnerStatus);
+    this.pill.mount(headerEl, async () => {
+      if (this.services.runnerControls.isPaused()) {
+        await this.services.runnerControls.resume();
+      } else {
+        await this.services.runnerControls.pause();
+      }
+    });
 
     this.messagesEl = container.createEl("div", { cls: "gemmera-messages" });
 
@@ -73,7 +87,8 @@ export class GemmeraChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // cleanup if needed
+    this.pill?.unmount();
+    this.pill = null;
   }
 
   private async checkOllamaStatus(el: HTMLElement): Promise<void> {
@@ -137,8 +152,61 @@ export class GemmeraChatView extends ItemView {
       return;
     }
 
+    // ── Capture (#13) ─────────────────────────────────────────────────
+    const intent = forcedLabel ?? route?.label ?? "ask";
+    if (intent === "capture") {
+      await this.runCapture(text, turnId);
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "capture" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
     // ── Chat ──────────────────────────────────────────────────────────
-    await this.runChat(text, forcedLabel ?? route?.label ?? "ask", turnId, route ?? null);
+    await this.runChat(text, intent, turnId, route ?? null);
+  }
+
+  private async runCapture(text: string, turnId: string): Promise<void> {
+    this.appendMessage("user", text);
+    try {
+      const outcome = await runIngest(
+        { text },
+        {
+          llm: this.services.llm,
+          promptLoader: this.services.promptLoader,
+          retriever: this.services.retriever,
+          store: this.services.ingestionStore,
+          vault: this.services.vault,
+          writer: this.services.ingestWriter,
+          jobQueue: this.services.jobQueue,
+          preview: (preview) => openIngestPreview(this.app, preview),
+          eventLog: this.services.eventLog,
+          turnId,
+          inboxFolder: this.settings.inboxFolder,
+          dedupThreshold: this.settings.dedupThreshold,
+          alwaysPreview: this.settings.alwaysPreviewBeforeSave,
+        },
+      );
+      this.services.runnerStatus.recompute();
+
+      if (outcome.kind === "saved") {
+        const verb = outcome.mode === "append" ? "Appended to" : "Saved to";
+        new Notice(`Gemmera: ${verb} ${outcome.path}`);
+        this.appendMessage("assistant", `${verb} **${outcome.path}**`);
+      } else if (outcome.kind === "cancelled") {
+        this.appendMessage("assistant", "Cancelled.");
+      } else if (outcome.kind === "skipped_existing") {
+        new Notice(`Gemmera: already saved as ${outcome.path}`);
+        this.appendMessage("assistant", `Already in vault: **${outcome.path}**`);
+      } else {
+        this.appendMessage("assistant", `Capture failed: ${outcome.reason}`);
+      }
+    } catch (err) {
+      this.appendMessage(
+        "assistant",
+        `Capture failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+    }
   }
 
   private async runChat(
@@ -265,7 +333,15 @@ export class GemmeraChatView extends ItemView {
             cancelled: false,
           }),
         );
-        await this.runChat(resolution.text, chosenLabel, resolution.turnId);
+        if (chosenLabel === "capture") {
+          await this.runCapture(resolution.text, resolution.turnId);
+          this.recentTurns = [
+            ...this.recentTurns.slice(-2),
+            { text: resolution.text, intent: "capture" },
+          ];
+        } else {
+          await this.runChat(resolution.text, chosenLabel, resolution.turnId);
+        }
       }
     }
 

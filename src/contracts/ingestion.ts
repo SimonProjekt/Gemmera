@@ -6,7 +6,47 @@ export interface NoteState {
   bodyHash: string; // sha256 of body after frontmatter strip
   mtime: number;
   frontmatter: string | null; // raw YAML between --- fences, null if absent
+  /**
+   * Rebuild epoch this note was last processed under (#15d). When the user
+   * triggers "Rebuild index", the global `rebuildEpoch` meta value is bumped;
+   * any note with `lastEpoch < rebuildEpoch` is treated as stale by the
+   * reconciler and re-enqueued. Resumability falls out for free: an interrupted
+   * rebuild just leaves some `lastEpoch` values un-bumped.
+   */
+  lastEpoch?: number;
 }
+
+/**
+ * Drift summary produced by the weekly reconciler (#15e). Counts what changed
+ * between the disk vault and the ingestion store since the last reconcile.
+ */
+export interface DriftReport {
+  ranAt: number;
+  added: string[];
+  removed: string[];
+  hashChanged: string[];
+}
+
+/**
+ * Process-wide ingestion metadata — runtime knobs that need to survive plugin
+ * reloads. Distinct from per-note state because it's keyed by setting name,
+ * not path. Persisted in the same JSON store under a separate `meta` namespace.
+ */
+export interface IngestionMeta {
+  paused: boolean;
+  rebuildEpoch: number;
+  lastReconciledAt: number;
+  lastRebuiltAt: number;
+  lastDriftReport: DriftReport | null;
+}
+
+export const DEFAULT_INGESTION_META: IngestionMeta = {
+  paused: false,
+  rebuildEpoch: 0,
+  lastReconciledAt: 0,
+  lastRebuiltAt: 0,
+  lastDriftReport: null,
+};
 
 export type IngestDecision =
   | { kind: "skip"; state: NoteState }
@@ -52,6 +92,22 @@ export interface IngestionStore {
    * the retriever to hydrate `RetrievalHit` rows from a hash-keyed search.
    */
   getChunksByHash(contentHash: string): Promise<Chunk[]>;
+
+  /**
+   * Read a runtime metadata value (#15). Returns `null` for unset keys so
+   * callers can distinguish "never written" from "explicitly false/0".
+   */
+  getMeta<K extends keyof IngestionMeta>(key: K): Promise<IngestionMeta[K] | null>;
+
+  /** Write a runtime metadata value. Persisted alongside note state. */
+  setMeta<K extends keyof IngestionMeta>(key: K, value: IngestionMeta[K]): Promise<void>;
+
+  /**
+   * Find note paths whose stored `bodyHash` matches `hash`. Used by the
+   * ingest tool loop (#13) to short-circuit exact-content duplicates
+   * without paying for an LLM call. Returns `[]` for no match.
+   */
+  findByBodyHash(hash: string): Promise<string[]>;
 }
 
 export interface IngestionPipeline {

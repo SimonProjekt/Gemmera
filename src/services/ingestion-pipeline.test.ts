@@ -4,10 +4,15 @@ import { InMemoryIngestionStore } from "../contracts/mocks/in-memory-ingestion-s
 import { MarkdownChunker } from "./markdown-chunker";
 import { HashGatedIngestionPipeline } from "./ingestion-pipeline";
 
-function setup(files: Record<string, string>) {
+function setup(files: Record<string, string>, epoch = () => 0) {
   const vault = new MockVaultService(files);
   const store = new InMemoryIngestionStore();
-  const pipeline = new HashGatedIngestionPipeline(vault, new MarkdownChunker(), store);
+  const pipeline = new HashGatedIngestionPipeline(
+    vault,
+    new MarkdownChunker(),
+    store,
+    epoch,
+  );
   return { vault, store, pipeline };
 }
 
@@ -103,5 +108,27 @@ describe("HashGatedIngestionPipeline", () => {
     await pipeline.ingest("Notes/a.md", { mtime: 1234567890 });
     const persisted = await store.get("Notes/a.md");
     expect(persisted?.mtime).toBe(1234567890);
+  });
+
+  it("re-processes a hash-clean note when its lastEpoch is below currentEpoch (rebuild)", async () => {
+    let epoch = 0;
+    const { pipeline, store } = setup(
+      { "Notes/a.md": "hello world" },
+      () => epoch,
+    );
+
+    const first = await pipeline.ingest("Notes/a.md");
+    expect(first.kind).toBe("rechunk");
+    expect((await store.get("Notes/a.md"))?.lastEpoch).toBe(0);
+
+    // Same content, same epoch → skip.
+    const stable = await pipeline.ingest("Notes/a.md");
+    expect(stable.kind).toBe("skip");
+
+    // Bump epoch (simulate rebuild). The hash gate must release.
+    epoch = 100;
+    const rebuilt = await pipeline.ingest("Notes/a.md");
+    expect(rebuilt.kind).not.toBe("skip");
+    expect((await store.get("Notes/a.md"))?.lastEpoch).toBe(100);
   });
 });
