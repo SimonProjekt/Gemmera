@@ -55,8 +55,16 @@ export async function decideStrategy(
 
   // 1. Exact-hash dedup short-circuit. The pipeline stores `bodyHash =
   //    sha256(body_after_frontmatter_strip)` per note, so hashing the
-  //    candidate body the same way matches existing notes whose body is
-  //    byte-identical regardless of frontmatter or chunk boundaries.
+  //    candidate body the same way matches notes whose body is byte-
+  //    identical regardless of frontmatter or chunk boundaries.
+  //
+  //    Caveat: this is a *byte* match, not a *semantic* match. The LLM
+  //    parser may normalise whitespace, list bullets, or quotes differently
+  //    on two runs of the same input — those produce different bytes and
+  //    will fall through to the threshold + LLM branches below. That's the
+  //    correct degradation: the slower paths still catch true near-dupes
+  //    via vector similarity. The hash short-circuit is purely a fast path
+  //    for the "user pasted the exact same thing twice" case.
   const bodyHash = sha256(spec.body_markdown);
   const exactMatches = await deps.store.findByBodyHash(bodyHash);
   if (exactMatches.length > 0) {

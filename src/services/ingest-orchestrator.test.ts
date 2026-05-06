@@ -235,6 +235,23 @@ describe("runIngest", () => {
     expect(previewCalls).toBeGreaterThan(0);
   });
 
+  it("rejects a plain confirm on a dedup_ask preview (handler returned wrong shape)", async () => {
+    const body = "# Decisions\n\nWe ship v2.";
+    const bodyHash = createHash("sha256").update(body).digest("hex");
+    const handler: PreviewHandler = async () => ({ action: "confirm" });
+    const { deps, vault, queue } = setup({
+      vaultFiles: { "Existing/standup.md": "# Existing\n" },
+      storeNotes: [{ path: "Existing/standup.md", bodyHash }],
+      preview: handler,
+    });
+    const result = await runIngest({ text: "Q2 standup notes" }, deps);
+    expect(result.kind).toBe("failed");
+    if (result.kind !== "failed") return;
+    expect(result.reason).toBe("confirm_on_dedup_ask");
+    expect(queue.size()).toBe(0);
+    expect(await vault.read("Existing/standup.md")).toBe("# Existing\n");
+  });
+
   it("emits an event-log entry for every orchestrator phase (issue #13 acceptance)", async () => {
     const { deps } = setup({ preview: autoConfirm });
     const eventLog = new InMemoryEventLog();

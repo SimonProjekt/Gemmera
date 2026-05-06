@@ -196,7 +196,14 @@ export async function runIngest(
         // The user has resolved the dedup; proceed straight to write.
         break;
       }
-      // confirm
+      // confirm — must not arrive when the strategy is dedup_ask. The
+      // dedup modal exposes append / save-anyway / cancel buttons only;
+      // a plain `confirm` here means the handler returned the wrong shape
+      // and writing would clobber the matched note. Reject explicitly.
+      if (strategy.kind === "dedup_ask") {
+        await enter(STATES.failed, { reason: "confirm_on_dedup_ask" });
+        return { kind: "failed", reason: "confirm_on_dedup_ask" };
+      }
       break;
     }
   }

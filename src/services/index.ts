@@ -120,10 +120,11 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     );
   }
   const ingestionStore = new JsonIngestionStore(adapter.getFullPath(STATE_PATH));
-  // Closure capture: RunnerControls bumps `meta.rebuildEpoch`; the pipeline
-  // reads it on every ingest. We can't `await` here, so we stash the latest
-  // value in a process-local cell and refresh on every meta write below.
-  const epochCell = { value: 0 };
+  // Closure cell so the synchronous epoch source the pipeline reads can be
+  // refreshed after async rebuilds. RunnerControls calls `onRebuild` once
+  // the new epoch is in store meta; the hook below refreshes the cell so
+  // the pipeline's hash gate sees the bump on the next ingest.
+  const epochCell = { value: (await ingestionStore.getMeta("rebuildEpoch")) ?? 0 };
   const ingestionPipeline = new HashGatedIngestionPipeline(
     vault,
     new MarkdownChunker(),
@@ -139,21 +140,17 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     ingestionStore,
     reconciler,
     jobQueue,
+    {
+      onRebuild: async () => {
+        epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? epochCell.value;
+      },
+    },
   );
   const scheduledReconciler = new ScheduledReconciler({
     vault,
     store: ingestionStore,
     reconciler,
   });
-  // Seed the epoch cell from persisted meta so rebuilds survive reload.
-  epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? 0;
-  // Re-read after rebuild so the pipeline's hash gate sees the new epoch.
-  const origRebuild = runnerControls.rebuild.bind(runnerControls);
-  runnerControls.rebuild = async () => {
-    const result = await origRebuild();
-    epochCell.value = (await ingestionStore.getMeta("rebuildEpoch")) ?? epochCell.value;
-    return result;
-  };
   const vectorStore = new BinaryVectorStore(
     adapter.getFullPath(VECTORS_BIN_PATH),
     adapter.getFullPath(VECTORS_JSON_PATH),

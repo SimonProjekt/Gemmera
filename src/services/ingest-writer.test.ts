@@ -71,6 +71,22 @@ describe("IngestWriter", () => {
     expect(result).toContain("New paragraph from chat.");
   });
 
+  it("does not duplicate heading when target ends with the heading and no trailing newline", async () => {
+    const target = "daily.md";
+    const vault = new MockVaultService({
+      [target]: "# Daily\n\n## 2026-05-06",
+    });
+    const writer = new IngestWriter(vault);
+    const fixedNow = () => Date.UTC(2026, 4, 6);
+
+    await writer.appendUnderDatedHeading(target, "Late entry.", { now: fixedNow });
+    const result = await vault.read(target);
+
+    const headingMatches = result.match(/## 2026-05-06/g) ?? [];
+    expect(headingMatches.length).toBe(1);
+    expect(result).toContain("Late entry.");
+  });
+
   it("appends under existing dated heading without creating a duplicate", async () => {
     const target = "daily.md";
     const vault = new MockVaultService({

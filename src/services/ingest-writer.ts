@@ -66,7 +66,10 @@ export class IngestWriter {
     const existing = await this.vault.read(targetPath);
     const heading = `## ${isoDate(now())}`;
     const trimmed = body.trim();
-    const append = existing.includes(`\n${heading}\n`)
+    // Match the heading even when it sits at the very end of the file with
+    // no trailing newline. The stricter form `\n${heading}\n` would miss
+    // "...\n## 2026-05-07" (no closing \n) and create a duplicate heading.
+    const append = existing.includes(`\n${heading}`)
       ? `\n\n${trimmed}\n`
       : `\n\n${heading}\n\n${trimmed}\n`;
     await this.vault.append(targetPath, append);

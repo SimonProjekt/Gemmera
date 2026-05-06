@@ -2,6 +2,19 @@ import type { IngestionStore, JobQueue, Reconciler } from "../contracts";
 import type { IngestionRunner } from "./ingestion-runner";
 import type { RunnerStatus } from "./runner-status";
 
+export interface RunnerControlsOptions {
+  /**
+   * Called after a successful rebuild has bumped `meta.rebuildEpoch`. The
+   * pipeline's epoch source (a closure cell in `createServices`) reads
+   * fresh meta and updates itself here. Construction-time injection beats
+   * monkey-patching the method after the fact, which broke for prototype
+   * dispatch and surprised readers.
+   */
+  onRebuild?: () => void | Promise<void>;
+}
+
+const NOOP = (): void => undefined;
+
 /**
  * User-facing indexer controls (#15c, #15d). Coordinates the runner, the
  * status observable, and persisted meta state. Single instance owns the
@@ -20,13 +33,18 @@ import type { RunnerStatus } from "./runner-status";
  * picks them up.
  */
 export class RunnerControls {
+  private readonly onRebuild: () => void | Promise<void>;
+
   constructor(
     private readonly runner: IngestionRunner,
     private readonly status: RunnerStatus,
     private readonly store: IngestionStore,
     private readonly reconciler: Reconciler,
     private readonly queue: JobQueue,
-  ) {}
+    options: RunnerControlsOptions = {},
+  ) {
+    this.onRebuild = options.onRebuild ?? NOOP;
+  }
 
   async applyPersistedState(): Promise<void> {
     const paused = (await this.store.getMeta("paused")) ?? false;
@@ -62,6 +80,10 @@ export class RunnerControls {
     const now = Date.now();
     await this.store.setMeta("rebuildEpoch", now);
     await this.store.setMeta("lastRebuiltAt", now);
+    // Notify any consumer that caches the epoch (e.g. the pipeline closure
+    // in createServices) BEFORE we kick off reconcile, so the first ingest
+    // sees the new epoch and re-stamps stale notes.
+    await this.onRebuild();
 
     // Re-running reconcile is the simplest way to enqueue everything: it
     // walks the vault and pushes an `index` job for every indexable path.
