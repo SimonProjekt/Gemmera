@@ -240,9 +240,16 @@ export class GemmeraChatView extends ItemView {
     }
 
     // Process any messages submitted while the chip was showing.
+    // Catch per-iteration: drainQueue() already cleared the internal queue,
+    // so an uncaught throw would silently drop everything after the failing item.
     for (const queued of this.chip.drainQueue()) {
       this.inputEl.value = queued;
-      await this.handleSend();
+      try {
+        await this.handleSend();
+      } catch {
+        // runChat handles display errors internally; this guard ensures the
+        // remaining queued messages are not lost on an unexpected throw.
+      }
     }
   }
 
