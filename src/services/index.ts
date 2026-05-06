@@ -7,7 +7,9 @@ import type {
   JobQueue,
   LLMService,
   PathFilter,
+  PayloadAssembler,
   Reconciler,
+  Retriever,
   VaultService,
   VectorStore,
 } from "../contracts";
@@ -32,33 +34,18 @@ import { VaultReconciler } from "./vault-reconciler";
 import { BinaryVectorStore } from "./binary-vector-store";
 import { OllamaEmbedder } from "./ollama-embedder";
 import { EmbeddingService } from "./embedding-service";
+import { InMemoryBM25Index } from "./in-memory-bm25-index";
+import { BM25IndexService } from "./bm25-index-service";
+import { InMemoryLinksIndex } from "./in-memory-links-index";
+import { LinksIndexService } from "./links-index-service";
+import { HybridRetriever } from "./hybrid-retriever";
+import { DefaultPayloadAssembler } from "./payload-assembler";
 import { RunnerStatus } from "./runner-status";
 import { RunnerControls } from "./runner-controls";
 import { ScheduledReconciler } from "./scheduled-reconciler";
 import { IngestWriter } from "./ingest-writer";
 import { InMemoryEventLog } from "./event-log";
-import type { EventLog, Retriever } from "../contracts";
-
-/**
- * Cold-vault stand-in retriever. Returns no hits — used until the hybrid
- * retriever (#8) is wired into the dev branch. The strategy step tolerates
- * an empty result and falls through to a `create` decision.
- *
- * TODO(#8): replace with HybridRetriever once the wiring branch lands.
- */
-class EmptyRetriever implements Retriever {
-  private warned = false;
-  async retrieve(): Promise<[]> {
-    if (!this.warned) {
-      this.warned = true;
-      // eslint-disable-next-line no-console
-      console.warn(
-        "[gemmera] retriever stub — similarity-based dedup is disabled until #8 lands",
-      );
-    }
-    return [];
-  }
-}
+import type { EventLog } from "../contracts";
 
 export interface Services {
   llm: LLMService;
@@ -73,13 +60,16 @@ export interface Services {
   reconciler: Reconciler;
   vectorStore: VectorStore;
   embeddingService: EmbeddingService;
+  bm25IndexService: BM25IndexService;
+  linksIndexService: LinksIndexService;
+  retriever: Retriever;
+  payloadAssembler: PayloadAssembler;
   promptLoader: PromptLoader;
   classifierEventWriter: ClassifierEventWriter;
   runnerStatus: RunnerStatus;
   runnerControls: RunnerControls;
   scheduledReconciler: ScheduledReconciler;
   ingestWriter: IngestWriter;
-  retriever: Retriever;
   eventLog: EventLog;
 }
 
@@ -168,6 +158,19 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     ingestionStore,
   );
 
+  const bm25Index = new InMemoryBM25Index();
+  const bm25IndexService = new BM25IndexService(ingestionRunner, bm25Index, ingestionStore);
+  const linksIndex = new InMemoryLinksIndex();
+  const linksIndexService = new LinksIndexService(ingestionRunner, vault, linksIndex);
+  const retriever = new HybridRetriever(
+    embedder,
+    vectorStore,
+    bm25Index,
+    linksIndex,
+    ingestionStore,
+  );
+  const payloadAssembler = new DefaultPayloadAssembler(linksIndex);
+
   return {
     llm: await createLLMService(settings.llmBackend),
     vault,
@@ -181,13 +184,16 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
     reconciler,
     vectorStore,
     embeddingService,
+    bm25IndexService,
+    linksIndexService,
+    retriever,
+    payloadAssembler,
     promptLoader: new FilePromptLoader(join(pluginDir, "prompts")),
     classifierEventWriter: new InMemoryClassifierEventWriter(),
     runnerStatus,
     runnerControls,
     scheduledReconciler,
     ingestWriter: new IngestWriter(vault),
-    retriever: new EmptyRetriever(),
     eventLog: new InMemoryEventLog(),
   };
 }
@@ -207,6 +213,12 @@ export { VaultReconciler } from "./vault-reconciler";
 export { BinaryVectorStore } from "./binary-vector-store";
 export { OllamaEmbedder } from "./ollama-embedder";
 export { EmbeddingService } from "./embedding-service";
+export { InMemoryBM25Index } from "./in-memory-bm25-index";
+export { BM25IndexService } from "./bm25-index-service";
+export { InMemoryLinksIndex } from "./in-memory-links-index";
+export { LinksIndexService } from "./links-index-service";
+export { HybridRetriever } from "./hybrid-retriever";
+export { DefaultPayloadAssembler } from "./payload-assembler";
 export { RunnerStatus } from "./runner-status";
 export { RunnerControls } from "./runner-controls";
 export { ScheduledReconciler } from "./scheduled-reconciler";

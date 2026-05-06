@@ -17,12 +17,14 @@ styles.css.map
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
 
-# Obsidian vault runtime state
-demo-vault/raw/.obsidian/workspace.json
-demo-vault/raw/.obsidian/workspace-mobile.json
-demo-vault/raw/.obsidian/appearance.json
-demo-vault/raw/.obsidian/graph.json
-demo-vault/raw/.obsidian/plugins/
+# Obsidian vault runtime state — same set whether the vault root is
+# demo-vault/ or demo-vault/raw/.
+demo-vault/**/.obsidian/workspace.json
+demo-vault/**/.obsidian/workspace-mobile.json
+demo-vault/**/.obsidian/appearance.json
+demo-vault/**/.obsidian/graph.json
+demo-vault/**/.obsidian/plugins/
+demo-vault/.obsidian/
 
 # Dev
 .hotreload
