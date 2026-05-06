@@ -172,3 +172,50 @@ export interface ClassifierEventWriter {
   writeDecision(row: ClassifierDecisionRow): Promise<void>;
   writeDisambiguation(row: ClassifierDisambiguationRow): Promise<void>;
 }
+
+// ─── Route decision (#79) ──────────────────────────────────────────────
+
+/**
+ * Result of running the full classifier pipeline (skip router → LLM →
+ * confidence check) against a single turn.  Returned by the classifier
+ * orchestrator and consumed by the turn router to dispatch into the
+ * ingest / query / meta state machines.
+ */
+export interface RouteDecision {
+  /** Owning turn id so the caller does not need to thread it separately. */
+  turnId: string;
+
+  /**
+   * Final intent label after all processing.
+   * - `null` when the skip router returned an error (empty message).
+   * - `"meta"` when the orchestrator short-circuits to help.
+   * - Otherwise the validated or fallback label.
+   */
+  label: IntentLabel | null;
+
+  /**
+   * Full classifier decision for the turn inspector and the event log.
+   * Always populated — even for empty-message errors, so the inspector
+   * can show the attempted classification.
+   */
+  decision: ClassifierDecision;
+
+  /**
+   * True when the confidence is below the active threshold and the
+   * disambiguation chip should be shown to the user.  Always false for
+   * skip-path decisions and true for LLM fallbacks (null output).
+   */
+  needsDisambiguation: boolean;
+
+  /**
+   * True when the orchestrator should short-circuit the main tool loop
+   * and render a response directly (currently only `"meta"`).
+   */
+  shortCircuit: boolean;
+
+  /**
+   * Static help text rendered when `shortCircuit` is true.  Undefined
+   * for non-meta routes.
+   */
+  helpResponse?: string;
+}
