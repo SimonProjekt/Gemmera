@@ -77,6 +77,26 @@ export type PresetCommand =
   | "cowork.capture-active-note"
   | "cowork.ask-about-active-note";
 
+// ─── Confidence thresholds ────────────────────────────────────────────
+
+/** Per-label confidence thresholds. When confidence falls below the
+ *  label's threshold, the disambiguation chip is shown. */
+export interface ClassifierThresholds {
+  capture: number;
+  ask: number;
+  mixed: number;
+  meta: number;
+}
+
+/** Anchor values from planning/classifier.md §"Confidence thresholds".
+ *  Committed values land after the first golden-set run during M1. */
+export const DEFAULT_CLASSIFIER_THRESHOLDS: ClassifierThresholds = {
+  capture: 0.85,
+  ask: 0.70,
+  mixed: 0.75,
+  meta: 0.70,
+};
+
 // ─── Decision log entry (upstream of #19 event-log schema) ────────────
 
 /** Source of a classifier decision. "skip" means a hard signal pre-empted
@@ -97,6 +117,18 @@ export interface ClassifierDecision {
    * "ctrl-enter", "leading-question-mark".
    */
   skipReason: SkipReason | null;
+  /**
+   * True when the confidence is below the active threshold and the
+   * disambiguation chip should be shown.  Always false for skip-path
+   * decisions and true for LLM fallbacks (null output).
+   */
+  needsDisambiguation: boolean;
+  /**
+   * Reason for LLM fallback — set when output is null and the LLM call
+   * failed (timeout, unparseable, invalid-label, invalid-confidence).
+   * Null for skip-path decisions and successful LLM calls.
+   */
+  fallbackReason: "timeout" | "unparseable" | "invalid-label" | "invalid-confidence" | null;
 }
 
 // ─── Event-log rows (#19) ─────────────────────────────────────────────
