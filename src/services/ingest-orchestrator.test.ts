@@ -270,6 +270,160 @@ describe("runIngest", () => {
     expect(states).toContain("WRITE");
     expect(states).toContain("UPDATE_INDEX");
     expect(states).toContain("DONE");
+    // First PARSE_CONTENT entry should come from CLASSIFY_INTENT (#39)
+    const parseEntry = entries.find((e) => e.state === "PARSE_CONTENT");
+    expect(parseEntry?.fromState).toBe("CLASSIFY_INTENT");
+  });
+
+  it("PROPOSE_SPLIT: previews all candidates and writes confirmed ones (#39)", async () => {
+    // Build a spec whose body has two level-2 heading sections so
+    // splitSpecByHeadings produces two candidates when the LLM returns "split".
+    const splitBody = "## Topic A\n\nContent about topic A.\n\n## Topic B\n\nContent about topic B.";
+    const splitSpecJson = JSON.stringify({
+      title: "Multi-topic note",
+      type: "concept",
+      tags: [],
+      aliases: [],
+      source: "chat-paste",
+      entities: [],
+      related: [],
+      status: "inbox",
+      summary: "Two topics",
+      key_points: [],
+      body_markdown: splitBody,
+      confidence: "high",
+    });
+    // LLM replies: first call is parseContent, second is decideStrategy (dedup-decider).
+    // We need the strategy to come out as "split". The strategy LLM call (decideStrategy)
+    // is only triggered if hits exist and score is in the LLM range. Use low-score hits
+    // to trigger the LLM path, then have LLM return "split".
+    const splitReply = JSON.stringify({ strategy: "split", reason: "two topics" });
+
+    // StaticLLM always returns the same reply, so we need a sequencing LLM.
+    class TwoReplyLLM implements LLMService {
+      private calls = 0;
+      private readonly replies = [splitSpecJson, splitReply];
+      async chat(_opts: ChatOptions): Promise<LLMResponse> {
+        const r = this.replies[this.calls] ?? this.replies[this.replies.length - 1];
+        this.calls++;
+        return { content: r };
+      }
+      async isReachable(): Promise<LLMReachability> { return "running"; }
+      async listModels() { return []; }
+      async pickDefaultModel() { return "mock"; }
+    }
+
+    // Use a retriever hit with a mid-range score (triggers LLM branch).
+    const midHit: RetrievalHit = {
+      path: "Notes/other.md",
+      title: "other",
+      ord: 0,
+      contentHash: "h1",
+      text: "Some related text",
+      headingPath: [],
+      score: 0.5,
+      winningSignal: "semantic",
+    };
+
+    let receivedKind = "";
+    let receivedCount = 0;
+    const splitHandler: PreviewHandler = async (preview) => {
+      receivedKind = preview.kind;
+      receivedCount = preview.candidates?.length ?? 0;
+      return {
+        action: "split_confirm",
+        confirmed: preview.candidates ?? [],
+      };
+    };
+
+    const vault = new MockVaultService();
+    const store = new InMemoryIngestionStore();
+    const queue = new InMemoryJobQueue();
+    const writer = new IngestWriter(vault);
+    const llm = new TwoReplyLLM();
+
+    const result = await runIngest(
+      { text: "Multi-topic content" },
+      {
+        llm,
+        promptLoader,
+        retriever: new StubRetriever([midHit]),
+        store,
+        vault,
+        writer,
+        jobQueue: queue,
+        preview: splitHandler,
+        inboxFolder: "Inbox/",
+        runId: () => "run-1",
+        model: "test-model",
+        version: "0.0.1",
+      },
+    );
+
+    expect(result.kind).toBe("split_saved");
+    if (result.kind !== "split_saved") return;
+    expect(result.paths).toHaveLength(2);
+    expect(result.specs).toHaveLength(2);
+    expect(receivedKind).toBe("split");
+    expect(receivedCount).toBe(2);
+    expect(queue.size()).toBe(2);
+  });
+
+  it("PROPOSE_SPLIT: cancel in split preview returns cancelled", async () => {
+    const splitBody = "## Section A\n\nA content.\n\n## Section B\n\nB content.";
+    const splitSpecJson = JSON.stringify({
+      title: "Two topics",
+      type: "concept",
+      tags: [], aliases: [], source: "chat-paste", entities: [], related: [],
+      status: "inbox", summary: "split", key_points: [],
+      body_markdown: splitBody, confidence: "high",
+    });
+    const splitReply = JSON.stringify({ strategy: "split", reason: "two topics" });
+
+    class TwoReplyLLM implements LLMService {
+      private calls = 0;
+      private readonly replies = [splitSpecJson, splitReply];
+      async chat(_opts: ChatOptions): Promise<LLMResponse> {
+        const r = this.replies[this.calls] ?? this.replies[this.replies.length - 1];
+        this.calls++;
+        return { content: r };
+      }
+      async isReachable(): Promise<LLMReachability> { return "running"; }
+      async listModels() { return []; }
+      async pickDefaultModel() { return "mock"; }
+    }
+
+    const midHit: RetrievalHit = {
+      path: "Notes/other.md", title: "other", ord: 0, contentHash: "h1",
+      text: "text", headingPath: [], score: 0.5, winningSignal: "semantic",
+    };
+
+    const { deps, queue } = setup({ preview: async () => ({ action: "cancel" }) });
+    const vault = new MockVaultService();
+    const store = new InMemoryIngestionStore();
+    const newQueue = new InMemoryJobQueue();
+    const writer = new IngestWriter(vault);
+
+    const result = await runIngest(
+      { text: "Two topics" },
+      {
+        llm: new TwoReplyLLM(),
+        promptLoader,
+        retriever: new StubRetriever([midHit]),
+        store,
+        vault,
+        writer,
+        jobQueue: newQueue,
+        preview: async () => ({ action: "cancel" }),
+        inboxFolder: "Inbox/",
+        runId: () => "run-1",
+        model: "test-model",
+        version: "0.0.1",
+      },
+    );
+
+    expect(result.kind).toBe("cancelled");
+    expect(newQueue.size()).toBe(0);
   });
 });
 
