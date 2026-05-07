@@ -68,7 +68,9 @@ export async function runQuery(
   deps: QueryOrchestratorDeps,
 ): Promise<QueryOutcome> {
   const turnId = deps.turnId ?? crypto.randomUUID();
-  let prevState = "IDLE";
+  // Classification happens upstream (classifier-orchestrator); query picks up
+  // from the state the classifier left on exit.
+  let prevState = "CLASSIFY_INTENT";
   const enter = async (state: string, payload?: Record<string, unknown>) => {
     if (!deps.eventLog) return;
     const entry: EventLogEntry = {

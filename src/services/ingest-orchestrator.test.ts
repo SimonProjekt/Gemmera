@@ -398,7 +398,6 @@ describe("runIngest", () => {
       text: "text", headingPath: [], score: 0.5, winningSignal: "semantic",
     };
 
-    const { deps, queue } = setup({ preview: async () => ({ action: "cancel" }) });
     const vault = new MockVaultService();
     const store = new InMemoryIngestionStore();
     const newQueue = new InMemoryJobQueue();
