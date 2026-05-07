@@ -27,4 +27,15 @@ export interface VaultService {
    * changed.
    */
   stat(path: string): Promise<VaultStat>;
+  /**
+   * Moves the file to Obsidian's trash (`.trash/`). Never a permanent delete.
+   * Throws if the file does not exist.
+   */
+  trash(path: string): Promise<void>;
+  /**
+   * Renames or moves a file. In the real vault this delegates to
+   * `FileManager.renameFile` so all incoming wikilinks update atomically.
+   * Throws if `from` does not exist or `to` already exists.
+   */
+  rename(from: string, to: string): Promise<void>;
 }
