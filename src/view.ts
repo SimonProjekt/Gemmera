@@ -134,7 +134,7 @@ export class GemmeraChatView extends ItemView {
   }
 
   private belowThreshold(decision: ClassifierDecision): boolean {
-    if (decision.confidence === 0) return true;
+    if (decision.failed) return false; // silent fallback — never show chip
     return decision.confidence < DEFAULT_THRESHOLDS[decision.label];
   }
 
@@ -195,6 +195,11 @@ export class GemmeraChatView extends ItemView {
         },
       });
       this.history.push({ role: "assistant", content: reply.content });
+
+      if (searchResults.length > 0) {
+        this.appendCitations(assistantEl, searchResults.map((r) => r.basename));
+      }
+
       const ops = parseFileOps(reply.content);
       if (ops.length > 0) await handleFileOps(this.app, ops);
     } catch (err) {
@@ -204,6 +209,14 @@ export class GemmeraChatView extends ItemView {
     } finally {
       this.setInputDisabled(false);
       this.inputEl.focus();
+    }
+  }
+
+  private appendCitations(container: HTMLElement, basenames: string[]): void {
+    const el = container.createEl("div", { cls: "gemmera-citations" });
+    el.createEl("span", { cls: "gemmera-citations__label", text: "Källor:" });
+    for (const name of basenames) {
+      el.createEl("span", { cls: "gemmera-citations__chip", text: name });
     }
   }
 
