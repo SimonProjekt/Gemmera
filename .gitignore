@@ -24,6 +24,9 @@ demo-vault/raw/.obsidian/appearance.json
 demo-vault/raw/.obsidian/graph.json
 demo-vault/raw/.obsidian/plugins/
 
+# Eval run output (generated at runtime — commit the golden set, not the runs)
+eval/runs/
+
 # Dev
 .hotreload
 .venv/

@@ -7,7 +7,9 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:classifier": "tsx eval/runner/classify.ts",
+    "eval:classifier:mock": "tsx eval/runner/classify.ts --mock"
   },
   "dependencies": {},
   "devDependencies": {
@@ -16,6 +18,7 @@
     "esbuild": "0.24.2",
     "typescript": "5.6.3",
     "builtin-modules": "4.0.0",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "tsx": "^4.19.2"
   }
 }
