@@ -1,5 +1,6 @@
 import { FileSystemAdapter, Notice, type App } from "obsidian";
 import type {
+  ClassifierService,
   IndexService,
   IngestionPipeline,
   IngestionStore,
@@ -12,6 +13,8 @@ import type {
 } from "../contracts";
 import type { GemmeraSettings } from "../settings";
 import { MockLLMService } from "./mock-llm";
+import { MockClassifierService } from "./mock-classifier";
+import { OllamaClassifierService } from "./ollama-classifier";
 import { OllamaLLMService } from "./ollama-llm";
 import { ObsidianVaultService } from "./real-vault";
 import { VaultLinearIndexService } from "./vault-index";
@@ -30,6 +33,7 @@ import { EmbeddingService } from "./embedding-service";
 
 export interface Services {
   llm: LLMService;
+  classifier: ClassifierService;
   vault: VaultService;
   index: IndexService;
   jobQueue: JobQueue;
@@ -61,6 +65,16 @@ export async function createLLMService(
     return new MockLLMService();
   }
   return ollama;
+}
+
+export function createClassifierService(
+  backend: GemmeraSettings["llmBackend"],
+  llm: LLMService,
+): ClassifierService {
+  if (backend === "mock" || llm instanceof MockLLMService) {
+    return new MockClassifierService();
+  }
+  return new OllamaClassifierService();
 }
 
 export async function createServices(app: App, settings: GemmeraSettings): Promise<Services> {
@@ -104,8 +118,10 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
     ingestionStore,
   );
 
+  const llm = await createLLMService(settings.llmBackend);
   return {
-    llm: await createLLMService(settings.llmBackend),
+    llm,
+    classifier: createClassifierService(settings.llmBackend, llm),
     vault,
     index: new VaultLinearIndexService(vault),
     jobQueue,
@@ -121,6 +137,8 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
 }
 
 export { OllamaLLMService } from "./ollama-llm";
+export { OllamaClassifierService } from "./ollama-classifier";
+export { MockClassifierService } from "./mock-classifier";
 export { ObsidianVaultService } from "./real-vault";
 export { VaultLinearIndexService } from "./vault-index";
 export { InMemoryJobQueue } from "./in-memory-job-queue";
