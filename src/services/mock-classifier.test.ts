@@ -31,4 +31,23 @@ describe("MockClassifierService", () => {
     expect(typeof d.promptVersion).toBe("string");
     expect(typeof d.latencyMs).toBe("number");
   });
+
+  it("returns source skip and skipReason for ?-prefix", async () => {
+    const d = await svc.classify({ messageText: "? vad är klockan" });
+    expect(d.source).toBe("skip");
+    expect(d.skipReason).toBe("leading-question-mark");
+  });
+
+  it("returns source skip for empty message", async () => {
+    const d = await svc.classify({ messageText: "" });
+    expect(d.source).toBe("skip");
+    expect(d.skipReason).toBe("empty");
+  });
+
+  it("returns source skip for attachment-only message", async () => {
+    const d = await svc.classify({ messageText: "", attachmentKinds: ["image/png"] });
+    expect(d.source).toBe("skip");
+    expect(d.label).toBe("capture");
+    expect(d.skipReason).toBe("attachment-only");
+  });
 });

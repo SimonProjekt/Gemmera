@@ -102,7 +102,7 @@ export class GemmeraChatView extends ItemView {
 
     switch (decision.label) {
       case "ask":
-      case "mixed":
+      case "mixed": // Mixed routes to ask path for now — save-ingest wiring tracked in #68.
         await this.runAskPath(text);
         break;
       case "capture":

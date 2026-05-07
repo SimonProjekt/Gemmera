@@ -44,6 +44,26 @@ export class MockClassifierService implements ClassifierService {
 
   async classify(opts: ClassifyOptions): Promise<ClassifierDecision> {
     const text = opts.messageText.trim();
+
+    if (!text && (!opts.attachmentKinds || opts.attachmentKinds.length === 0)) {
+      return {
+        label: "ask", confidence: 1.0, rationale: "empty",
+        source: "skip", skipReason: "empty", latencyMs: 0, promptVersion: "mock",
+      };
+    }
+    if (text.startsWith("?")) {
+      return {
+        label: "ask", confidence: 1.0, rationale: "Leading question mark prefix.",
+        source: "skip", skipReason: "leading-question-mark", latencyMs: 0, promptVersion: "mock",
+      };
+    }
+    if (opts.attachmentKinds && opts.attachmentKinds.length > 0 && !text) {
+      return {
+        label: "capture", confidence: 1.0, rationale: "attachment-only",
+        source: "skip", skipReason: "attachment-only", latencyMs: 0, promptVersion: "mock",
+      };
+    }
+
     const entry = this.script.find((s) => s.match(text)) ?? this.script[this.script.length - 1];
     return {
       label: entry.label,
