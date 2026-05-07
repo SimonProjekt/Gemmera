@@ -17,6 +17,7 @@ export class GemmeraChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private chipEl: HTMLElement | null = null;
+  private chipDecision: ClassifierDecision | null = null;
   private history: ChatMessage[] = [];
   private recentTurns: RecentTurn[] = [];
   private model = "gemma3:latest";
@@ -25,17 +26,9 @@ export class GemmeraChatView extends ItemView {
     super(leaf);
   }
 
-  getViewType(): string {
-    return VIEW_TYPE;
-  }
-
-  getDisplayText(): string {
-    return "Gemmera";
-  }
-
-  getIcon(): string {
-    return "message-square";
-  }
+  getViewType(): string { return VIEW_TYPE; }
+  getDisplayText(): string { return "Gemmera"; }
+  getIcon(): string { return "message-square"; }
 
   async onOpen(): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement;
@@ -53,10 +46,7 @@ export class GemmeraChatView extends ItemView {
       cls: "gemmera-input",
       attr: { placeholder: "Skriv ett meddelande... (? för fråga, Ctrl+Enter för spara)", rows: "3" },
     });
-    this.sendBtn = inputArea.createEl("button", {
-      cls: "gemmera-send",
-      text: "Skicka",
-    });
+    this.sendBtn = inputArea.createEl("button", { cls: "gemmera-send", text: "Skicka" });
     this.sendBtn.addEventListener("click", () => this.handleSend());
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -85,32 +75,30 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
-  private async handleSend(opts?: { text?: string; forcedLabel?: IntentLabel }): Promise<void> {
+  private async handleSend(opts?: {
+    text?: string;
+    forcedLabel?: IntentLabel;
+    originalDecision?: ClassifierDecision;
+  }): Promise<void> {
     const text = opts?.text ?? this.inputEl.value.trim();
     if (!text) return;
 
-    if (!opts?.text) {
-      this.inputEl.value = "";
-    }
+    if (!opts?.text) this.inputEl.value = "";
     this.dismissChip();
     this.setInputDisabled(true);
 
     const decision = await this.classifyMessage(text, opts?.forcedLabel);
 
     // Below-threshold or classifier failure → show disambiguation chip
-    if (
-      decision.source === "llm" &&
-      !opts?.forcedLabel &&
-      this.belowThreshold(decision)
-    ) {
-      this.showDisambiguationChip(text, decision.rationale);
+    if (decision.source === "llm" && !opts?.forcedLabel && this.belowThreshold(decision)) {
+      this.showDisambiguationChip(text, decision);
       this.setInputDisabled(false);
       return;
     }
 
     this.history.push({ role: "user", content: text });
-    this.appendMessage("user", text);
     this.recentTurns = [...this.recentTurns.slice(-2), { userText: text, label: decision.label }];
+    this.appendUserTurn(text, decision, opts?.originalDecision);
 
     switch (decision.label) {
       case "ask":
@@ -146,19 +134,21 @@ export class GemmeraChatView extends ItemView {
   }
 
   private belowThreshold(decision: ClassifierDecision): boolean {
-    if (decision.confidence === 0) return true; // classifier failure fallback
-    const threshold = DEFAULT_THRESHOLDS[decision.label];
-    return decision.confidence < threshold;
+    if (decision.confidence === 0) return true;
+    return decision.confidence < DEFAULT_THRESHOLDS[decision.label];
   }
 
-  private showDisambiguationChip(text: string, rationale: string): void {
+  // ── Disambiguation chip ────────────────────────────────────────────────────
+
+  private showDisambiguationChip(text: string, decision: ClassifierDecision): void {
     this.dismissChip();
+    this.chipDecision = decision;
 
     const inputArea = this.inputEl.closest(".gemmera-input-area") as HTMLElement | null;
     if (!inputArea?.parentElement) return;
 
     const chip = inputArea.parentElement.createEl("div", { cls: "gemmera-chip" });
-    chip.title = rationale;
+    chip.title = decision.rationale;
     this.chipEl = chip;
 
     chip.createEl("span", { cls: "gemmera-chip__label", text: "Vad menade du?" });
@@ -168,23 +158,27 @@ export class GemmeraChatView extends ItemView {
     const cancelBtn = chip.createEl("button", { cls: "gemmera-chip__btn gemmera-chip__btn--cancel", text: "Avbryt" });
 
     saveBtn.addEventListener("click", () => {
+      const original = this.chipDecision;
       this.dismissChip();
-      void this.handleSend({ text, forcedLabel: "capture" });
+      void this.handleSend({ text, forcedLabel: "capture", originalDecision: original ?? undefined });
     });
     askBtn.addEventListener("click", () => {
+      const original = this.chipDecision;
       this.dismissChip();
-      void this.handleSend({ text, forcedLabel: "ask" });
+      void this.handleSend({ text, forcedLabel: "ask", originalDecision: original ?? undefined });
     });
     cancelBtn.addEventListener("click", () => this.dismissChip());
 
-    // Insert the chip just before the input area
     inputArea.parentElement.insertBefore(chip, inputArea);
   }
 
   private dismissChip(): void {
     this.chipEl?.remove();
     this.chipEl = null;
+    this.chipDecision = null;
   }
+
+  // ── Routing paths ──────────────────────────────────────────────────────────
 
   private async runAskPath(text: string): Promise<void> {
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
@@ -213,7 +207,7 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
-  // Capture routes to the ask path for now — the LLM creates notes via fileops.
+  // Capture routes to the ask path for now — LLM creates notes via fileops.
   // Full ingest-state-machine wiring tracked in #68.
   private async runCapturePath(text: string): Promise<void> {
     return this.runAskPath(text);
@@ -233,9 +227,67 @@ export class GemmeraChatView extends ItemView {
     this.inputEl.focus();
   }
 
-  private setInputDisabled(disabled: boolean): void {
-    this.inputEl.disabled = disabled;
-    this.sendBtn.disabled = disabled;
+  // ── Rendering ──────────────────────────────────────────────────────────────
+
+  private appendUserTurn(
+    text: string,
+    decision: ClassifierDecision,
+    originalDecision?: ClassifierDecision,
+  ): void {
+    const wrap = this.messagesEl.createEl("div", { cls: "gemmera-turn" });
+    const msg = wrap.createEl("div", { cls: "gemmera-message gemmera-message--user" });
+    msg.createEl("span", { cls: "gemmera-message__role", text: "Du" });
+    msg.createEl("p", { cls: "gemmera-message__text", text });
+    this.appendInspectorPanel(wrap, decision, originalDecision);
+    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+  }
+
+  private appendInspectorPanel(
+    container: HTMLElement,
+    decision: ClassifierDecision,
+    originalDecision?: ClassifierDecision,
+  ): void {
+    const panel = container.createEl("div", { cls: "gemmera-inspector" });
+
+    if (decision.source === "skip") {
+      const badge = panel.createEl("span", { cls: "gemmera-inspector__badge gemmera-inspector__badge--skip", text: "skip" });
+      badge.title = "Intent was determined without calling the LLM";
+      panel.createEl("span", { cls: "gemmera-inspector__label", text: decision.label });
+      panel.createEl("span", { cls: "gemmera-inspector__meta", text: decision.skipReason ?? "" });
+      return;
+    }
+
+    // LLM path
+    const wasDisambiguated = !!originalDecision;
+    const badgeText = wasDisambiguated ? "disambig" : "llm";
+    const badge = panel.createEl("span", {
+      cls: `gemmera-inspector__badge gemmera-inspector__badge--llm${wasDisambiguated ? " gemmera-inspector__badge--disambig" : ""}`,
+      text: badgeText,
+    });
+    badge.title = wasDisambiguated
+      ? `Original: ${originalDecision!.label} (${pct(originalDecision!.confidence)}) → user chose ${decision.label}`
+      : "Intent classified by LLM";
+
+    panel.createEl("span", { cls: "gemmera-inspector__label", text: decision.label });
+
+    if (wasDisambiguated) {
+      panel.createEl("span", {
+        cls: "gemmera-inspector__meta",
+        text: `was ${originalDecision!.label} ${pct(originalDecision!.confidence)}`,
+      });
+    } else {
+      panel.createEl("span", { cls: "gemmera-inspector__confidence", text: pct(decision.confidence) });
+    }
+
+    panel.createEl("span", { cls: "gemmera-inspector__rationale", text: decision.rationale });
+    panel.createEl("span", { cls: "gemmera-inspector__latency", text: `${decision.latencyMs}ms` });
+
+    // Collapsible raw JSON
+    const details = panel.createEl("details", { cls: "gemmera-inspector__raw" });
+    details.createEl("summary", { text: "raw" });
+    const payload: Record<string, unknown> = { ...decision };
+    if (wasDisambiguated) payload["originalDecision"] = originalDecision;
+    details.createEl("pre", { text: JSON.stringify(payload, null, 2) });
   }
 
   private appendStreamingMessage(): { el: HTMLElement; textEl: HTMLElement } {
@@ -252,6 +304,15 @@ export class GemmeraChatView extends ItemView {
     msg.createEl("p", { cls: "gemmera-message__text", text });
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
   }
+
+  private setInputDisabled(disabled: boolean): void {
+    this.inputEl.disabled = disabled;
+    this.sendBtn.disabled = disabled;
+  }
+}
+
+function pct(confidence: number): string {
+  return `${Math.round(confidence * 100)}%`;
 }
 
 export function withContext(

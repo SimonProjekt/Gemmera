@@ -81,3 +81,124 @@
 .gemmera-send {
   align-self: flex-end;
 }
+
+/* ── Turn wrapper ─────────────────────────────────────────────────────────── */
+.gemmera-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+/* ── Classifier inspector panel ───────────────────────────────────────────── */
+.gemmera-inspector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  max-width: 90%;
+  line-height: 1.4;
+}
+
+.gemmera-inspector__badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.gemmera-inspector__badge--skip {
+  background: var(--background-modifier-border);
+}
+
+.gemmera-inspector__badge--llm {
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+  color: var(--interactive-accent);
+}
+
+.gemmera-inspector__badge--disambig {
+  background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+  color: var(--color-yellow);
+}
+
+.gemmera-inspector__label {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.gemmera-inspector__confidence {
+  font-variant-numeric: tabular-nums;
+}
+
+.gemmera-inspector__rationale {
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.gemmera-inspector__latency {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.gemmera-inspector__meta {
+  color: var(--text-faint);
+}
+
+.gemmera-inspector__raw {
+  width: 100%;
+}
+
+.gemmera-inspector__raw summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.gemmera-inspector__raw pre {
+  font-size: 0.65rem;
+  margin: 4px 0 0;
+  padding: 6px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ── Disambiguation chip ──────────────────────────────────────────────────── */
+.gemmera-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: 0.8rem;
+}
+
+.gemmera-chip__label {
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.gemmera-chip__btn {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.gemmera-chip__btn--cancel {
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+}
