@@ -217,7 +217,7 @@ export class GemmeraChatView extends ItemView {
         this.appendMessage("assistant", `Capture failed: ${outcome.reason}`);
       }
     } catch (err) {
-      this.appendErrorMessage(err, () => this.runCapture(text, turnId));
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     }
   }
 
