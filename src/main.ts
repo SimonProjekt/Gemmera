@@ -15,11 +15,6 @@ export default class GemmeraPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.setText("Cowork: detecting…");
-    this.statusBarEl.onClickEvent(() => {
-      if (this.lifecycle.status === "not_responding") {
-        this.lifecycle.restart().catch((err) => console.error("[gemmera] restart failed", err));
-      }
-    });
     this.lifecycle = new OllamaLifecycle({
       ollamaCmd: this.settings.ollamaPathMode === "manual" && this.settings.ollamaPath
         ? this.settings.ollamaPath
@@ -28,6 +23,11 @@ export default class GemmeraPlugin extends Plugin {
         this.statusBarEl.setText(ollamaStatusLabel(status));
       },
       log: (line) => console.log(line),
+    });
+    this.statusBarEl.onClickEvent(() => {
+      if (this.lifecycle.status === "not_responding") {
+        this.lifecycle.restart().catch((err) => console.error("[gemmera] restart failed", err));
+      }
     });
     // Start Ollama lifecycle in the background — chat is usable if Ollama was already running.
     this.lifecycle.start().catch((err) => console.error("[gemmera] lifecycle start failed", err));

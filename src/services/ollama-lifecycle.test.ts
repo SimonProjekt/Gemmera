@@ -103,7 +103,7 @@ describe("start() — Ollama already running", () => {
 
 describe("start() — Ollama not running, spawn", () => {
   it("sets ready when health comes up after spawn", async () => {
-    const statuses: OltramaStatus[] = [];
+    const statuses: OllamaStatus[] = [];
     let healthCalls = 0;
     const lc = new OllamaLifecycle(baseDeps({
       healthFn: async () => {
@@ -112,7 +112,7 @@ describe("start() — Ollama not running, spawn", () => {
         return healthCalls >= 2;
       },
       startupTimeoutMs: 200,
-      onStatusChange: (s) => statuses.push(s as OllamaStatus),
+      onStatusChange: (s) => statuses.push(s),
     }));
     await lc.start();
     expect(lc.status).toBe("ready");
@@ -346,7 +346,7 @@ describe("restart()", () => {
     await lc.start();
     const calls = spawnFn.mock.calls.length;
     // Fire two restarts concurrently.
-    const [r1, r2] = await Promise.all([lc.restart(), lc.restart()]);
+    await Promise.all([lc.restart(), lc.restart()]);
     // Only one additional spawn should happen.
     expect(spawnFn.mock.calls.length).toBe(calls + 1);
   });
@@ -371,5 +371,3 @@ describe("restart()", () => {
   });
 });
 
-// Helper type alias for test body (avoids the typo on line above)
-type OltramaStatus = OllamaStatus;

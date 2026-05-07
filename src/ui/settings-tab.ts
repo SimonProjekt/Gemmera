@@ -181,7 +181,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Ollama path")
-      .setDesc("auto: find ollama on PATH. manual: provide an explicit path.")
+      .setDesc("auto: find ollama on PATH. manual: provide an explicit path. Changes take effect on next Obsidian restart.")
       .addDropdown((dd: { addOption: (v: string, l: string) => unknown; setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown }) => {
         dd.addOption("auto", "Auto (PATH lookup)");
         dd.addOption("manual", "Manual path");
