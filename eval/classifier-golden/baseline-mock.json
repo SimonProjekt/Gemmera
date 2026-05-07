@@ -1,0 +1,12 @@
+{
+  "_comment": "Committed mock-classifier baseline. Regenerate with: npm run eval:classifier:mock -- --save-baseline eval/classifier-golden/baseline-mock.json",
+  "model": "mock",
+  "generatedAt": "2026-05-07T13:21:04.637Z",
+  "totalExamples": 30,
+  "totalAsk": 8,
+  "askCaptureFalsePositives": 0,
+  "askCaptureFpr": 0.0,
+  "accuracy": 0.5666666666666667,
+  "capturePrecision": 0.5,
+  "captureRecall": 0.3333333333333333
+}

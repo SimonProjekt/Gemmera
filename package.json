@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:classifier": "tsx eval/runner/classify.ts",
-    "eval:classifier:mock": "tsx eval/runner/classify.ts --mock"
+    "eval:classifier:mock": "tsx eval/runner/classify.ts --mock",
+    "eval:classifier:ci": "tsx eval/runner/classify.ts --mock --compare eval/classifier-golden/baseline-mock.json"
   },
   "dependencies": {},
   "devDependencies": {

@@ -74,14 +74,20 @@ Three fields. No trailing prose. `confidence` is a raw model-reported probabilit
 
 The exact threshold numbers are tuned during build against the classifier golden set. The shape is asymmetric: `capture` requires a higher confidence than `ask` because misclassifying `ask` as `capture` is costlier (a silent note may get written) than the reverse.
 
-Starting points to anchor the eval work, not committed values:
+**Committed values (v1.0, 2026-05-07):**
 
-- `ask` threshold: 0.70.
-- `capture` threshold: 0.85.
-- `mixed` threshold: 0.75.
-- `meta` threshold: 0.70.
+| Label     | Threshold | Rationale |
+|-----------|-----------|-----------|
+| `capture` | 0.85      | Highest threshold — misrouting `ask` as `capture` causes silent writes, which is the costliest error. |
+| `mixed`   | 0.75      | Mid-range — mixed turns that fall below this are safer to route via disambiguation than to guess. |
+| `ask`     | 0.70      | Lower threshold — misrouting `capture` as `ask` is recoverable; user sees the answer and can re-save. |
+| `meta`    | 0.70      | Lower threshold — meta fallback to `ask` is safe; user gets a vault answer instead of help text, low cost. |
 
-Below threshold, the disambiguation chip appears. Committed values land after the first golden-set run during M1.
+These values are encoded in `src/contracts/classifier.ts` (`DEFAULT_THRESHOLDS`) and are guarded by the CI regression check. Update the code constant and the baseline when re-tuning.
+
+**Tuning process:** run `npm run eval:classifier` (requires Ollama) against the 30-example golden set. Adjust thresholds to maintain `capture` > `ask` asymmetry and maximise `capture` precision without sacrificing `ask` recall. Re-generate the mock baseline with `npm run eval:classifier:mock -- --save-baseline eval/classifier-golden/baseline-mock.json` after any golden set changes.
+
+Below threshold, the disambiguation chip appears.
 
 ## Disambiguation UX
 
@@ -133,7 +139,8 @@ A classifier golden set, distinct from the retrieval golden set.
 - **Initial size**: 30 hand-labeled examples covering all four labels and the main edge cases (attachments, follow-ups, ambiguous phrasing, meta questions).
 - **Growth**: to 100+ during beta. The disambiguation chip is a built-in labeled-example factory — every user correction becomes a labeled example.
 - **Metrics**: per-class precision and recall, full confusion matrix, P50 and P95 latency.
-- **Regression policy**: any drop in `ask → capture` precision is a P0 regression. Other regressions are P1.
+- **Regression policy**: any increase in the `ask → capture` false-positive rate (asks misrouted as capture) is a **P0 regression** — the CI gate in `.github/workflows/classifier-regression.yml` fails the build. A drop in overall accuracy of more than 5 percentage points vs the committed baseline is a **P1 regression** — logged as a warning, does not fail CI. All other metric changes are informational.
+- **CI gate**: `npm run eval:classifier:ci` runs the mock classifier against the golden set and compares to `eval/classifier-golden/baseline-mock.json`. Triggers on PRs touching `src/contracts/classifier.ts`, `src/services/ollama-classifier.ts`, `src/services/mock-classifier.ts`, or `eval/classifier-golden/**`.
 
 ## Prompt structure
 

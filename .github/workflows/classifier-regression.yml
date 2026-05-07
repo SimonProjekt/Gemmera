@@ -1,0 +1,35 @@
+name: Classifier regression check
+
+on:
+  pull_request:
+    paths:
+      - "src/contracts/classifier.ts"
+      - "src/services/ollama-classifier.ts"
+      - "src/services/mock-classifier.ts"
+      - "eval/classifier-golden/**"
+
+jobs:
+  regression:
+    name: Mock eval — P0 regression gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run classifier eval (mock) and compare to baseline
+        run: npm run eval:classifier:ci
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classifier-eval-report
+          path: eval/runs/

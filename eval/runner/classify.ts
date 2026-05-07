@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type { IntentLabel } from "../../src/contracts/classifier";
 import { MockClassifierService } from "../../src/services/mock-classifier";
 import { OllamaClassifierService } from "../../src/services/ollama-classifier";
@@ -13,6 +13,10 @@ const LABELS: IntentLabel[] = ["capture", "ask", "mixed", "meta"];
 const useMock = process.argv.includes("--mock");
 const modelArg = process.argv.find((a) => a.startsWith("--model="))?.split("=")[1];
 const model = modelArg ?? "gemma3:latest";
+const compareArg = process.argv.find((a) => a.startsWith("--compare="))?.split("=")[1]
+  ?? (process.argv.includes("--compare") ? process.argv[process.argv.indexOf("--compare") + 1] : undefined);
+const saveBaselineArg = process.argv.find((a) => a.startsWith("--save-baseline="))?.split("=")[1]
+  ?? (process.argv.includes("--save-baseline") ? process.argv[process.argv.indexOf("--save-baseline") + 1] : undefined);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -183,8 +187,31 @@ function report(results: Result[]): void {
     results,
   };
 
+  // Derived metrics used for baseline comparison
+  const totalAsk = results.filter((r) => r.expected === "ask").length;
+  const askCaptureFalsePositives = confusion["capture"]["ask"];
+  const askCaptureFpr = totalAsk === 0 ? 0 : askCaptureFalsePositives / totalAsk;
+
   writeFileSync(join(outDir, "report.md"), md.join("\n"));
   writeFileSync(join(outDir, "report.json"), JSON.stringify(json, null, 2));
+
+  // Save baseline if requested
+  if (saveBaselineArg) {
+    const baseline = {
+      _comment: "Committed mock-classifier baseline. Regenerate with: npm run eval:classifier:mock -- --save-baseline eval/classifier-golden/baseline-mock.json",
+      model: useMock ? "mock" : model,
+      generatedAt: new Date().toISOString(),
+      totalExamples: total,
+      totalAsk,
+      askCaptureFalsePositives,
+      askCaptureFpr,
+      accuracy: passedCount / total,
+      capturePrecision: precision("capture"),
+      captureRecall: recall("capture"),
+    };
+    writeFileSync(resolve(saveBaselineArg), JSON.stringify(baseline, null, 2));
+    console.log(`\nBaseline saved → ${saveBaselineArg}`);
+  }
 
   console.log(`\nResults → ${outDir}/`);
   console.log(`Accuracy: ${passedCount}/${total} (${pct(passedCount / total)})`);
@@ -193,6 +220,35 @@ function report(results: Result[]): void {
     console.log(`\nFailures (${failures.length}):`);
     for (const r of failures) {
       console.log(`  ${r.id}: expected ${r.expected}, got ${r.actual} — "${r.notes ?? r.rationale}"`);
+    }
+  }
+
+  // Regression check
+  if (compareArg) {
+    const baseline = JSON.parse(readFileSync(resolve(compareArg), "utf-8")) as {
+      askCaptureFpr: number;
+      accuracy: number;
+    };
+
+    let p0 = false;
+    if (askCaptureFpr > baseline.askCaptureFpr) {
+      console.error(
+        `\n[P0 REGRESSION] ask→capture false-positive rate rose: ${pct(baseline.askCaptureFpr)} → ${pct(askCaptureFpr)}`,
+      );
+      p0 = true;
+    }
+
+    const accuracyDrop = baseline.accuracy - passedCount / total;
+    if (accuracyDrop > 0.05) {
+      console.warn(
+        `\n[P1 REGRESSION] Overall accuracy dropped ${pct(accuracyDrop)} vs baseline (${pct(baseline.accuracy)} → ${pct(passedCount / total)})`,
+      );
+    }
+
+    if (!p0) {
+      console.log("\n✓ No P0 regressions detected.");
+    } else {
+      process.exit(1);
     }
   }
 }
