@@ -262,9 +262,13 @@ export class GemmeraChatView extends ItemView {
       });
       this.history.push({ role: "assistant", content: reply.content });
 
-      if (this.currentSessionId) {
-        void this.chatHistory?.appendTurn(this.currentSessionId, { role: "user", content: text, timestamp: userTs });
-        void this.chatHistory?.appendTurn(this.currentSessionId, { role: "assistant", content: reply.content, timestamp: Date.now() });
+      if (this.currentSessionId && this.chatHistory) {
+        const sid = this.currentSessionId;
+        const ch = this.chatHistory;
+        (async () => {
+          await ch.appendTurn(sid, { role: "user", content: text, timestamp: userTs });
+          await ch.appendTurn(sid, { role: "assistant", content: reply.content, timestamp: Date.now() });
+        })().catch(() => {});
       }
 
       // Record for classifier context on the next turn (last 3 only).
