@@ -26,6 +26,13 @@ export interface GemmeraSettings {
 
   /** Cosine score above which a similar note is treated as a near-duplicate. */
   dedupThreshold: number;
+
+  /**
+   * Wall-clock budget per turn in milliseconds. Clamped to
+   * HARD_STOPS.WALL_CLOCK_MS_MAX (300 000 ms) on load. Other hard-stop
+   * ceilings (tool calls, no-ops, retries) are constants and not exposed here.
+   */
+  turnTimeoutMs: number;
 }
 
 export const DEFAULT_SETTINGS: GemmeraSettings = {
@@ -34,4 +41,5 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   alwaysPreviewBeforeSave: true,
   inboxFolder: "Inbox/",
   dedupThreshold: 0.85,
+  turnTimeoutMs: 120_000,
 };
