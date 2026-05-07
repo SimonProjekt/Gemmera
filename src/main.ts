@@ -1,15 +1,36 @@
-import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Plugin, WorkspaceLeaf, type StatusBarItem } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
+import { OllamaLifecycle, type OllamaStatus } from "./services/ollama-lifecycle";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
 import { GemmeraSettingsTab } from "./ui/settings-tab";
 
 export default class GemmeraPlugin extends Plugin {
   private services!: Services;
   settings!: GemmeraSettings;
+  private lifecycle!: OllamaLifecycle;
+  private statusBarEl!: StatusBarItem;
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.setText("Cowork: detecting…");
+    this.statusBarEl.onClickEvent(() => {
+      if (this.lifecycle.status === "not_responding") {
+        this.lifecycle.restart().catch((err) => console.error("[gemmera] restart failed", err));
+      }
+    });
+    this.lifecycle = new OllamaLifecycle({
+      ollamaCmd: this.settings.ollamaPathMode === "manual" && this.settings.ollamaPath
+        ? this.settings.ollamaPath
+        : "ollama",
+      onStatusChange: (status: OllamaStatus) => {
+        this.statusBarEl.setText(ollamaStatusLabel(status));
+      },
+      log: (line) => console.log(line),
+    });
+    // Start Ollama lifecycle in the background — chat is usable if Ollama was already running.
+    this.lifecycle.start().catch((err) => console.error("[gemmera] lifecycle start failed", err));
     const pluginDir = (this.app.vault.adapter as FileSystemAdapter).getFullPath(this.manifest.dir ?? ".obsidian/plugins/gemmera");
     this.services = await createServices(this.app, this.settings, pluginDir);
     // Apply persisted pause flag BEFORE any service can claim work — otherwise
@@ -41,6 +62,7 @@ export default class GemmeraPlugin extends Plugin {
       this.services.ingestionStore,
       this.settings,
       () => this.saveData(this.settings),
+      this.lifecycle,
     );
     // Pre-load the snapshot so the first paint of the tab is sync.
     void settingsTab.refresh();
@@ -63,6 +85,7 @@ export default class GemmeraPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    await this.lifecycle?.stop();
     this.services?.eventBridge.stop();
     this.services?.runnerStatus.stop();
     this.services?.scheduledReconciler.stop();
@@ -128,5 +151,16 @@ export default class GemmeraPlugin extends Plugin {
     if (!leaf) return;
     await leaf.setViewState({ type: VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+}
+
+function ollamaStatusLabel(status: OllamaStatus): string {
+  switch (status) {
+    case "detecting":     return "Cowork: detecting…";
+    case "starting":      return "Cowork: starting…";
+    case "ready":         return "Cowork: ready";
+    case "not_responding": return "Cowork: Ollama not responding — click to restart";
+    case "restarting":    return "Cowork: restarting…";
+    case "not_installed": return "Cowork: Ollama not found";
   }
 }

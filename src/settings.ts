@@ -26,6 +26,18 @@ export interface GemmeraSettings {
 
   /** Cosine score above which a similar note is treated as a near-duplicate. */
   dedupThreshold: number;
+
+  /**
+   * "auto" = find ollama on PATH. "manual" = use ollamaPath.
+   * Wired to Settings → Ollama → path mode (#28).
+   */
+  ollamaPathMode: "auto" | "manual";
+
+  /**
+   * Explicit path to the Ollama binary. Only used when ollamaPathMode = "manual".
+   * Example: "/usr/local/bin/ollama"
+   */
+  ollamaPath: string;
 }
 
 export const DEFAULT_SETTINGS: GemmeraSettings = {
@@ -34,4 +46,6 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   alwaysPreviewBeforeSave: true,
   inboxFolder: "Inbox/",
   dedupThreshold: 0.85,
+  ollamaPathMode: "auto",
+  ollamaPath: "",
 };

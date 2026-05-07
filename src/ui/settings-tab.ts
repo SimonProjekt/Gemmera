@@ -1,5 +1,6 @@
 import { Notice, PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 import type { DriftReport, IngestionStore } from "../contracts";
+import type { OllamaLifecycle } from "../services/ollama-lifecycle";
 import type { RunnerControls } from "../services/runner-controls";
 import type { ScheduledReconciler } from "../services/scheduled-reconciler";
 import type { GemmeraSettings } from "../settings";
@@ -39,6 +40,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
     private readonly store: IngestionStore,
     private readonly settings: GemmeraSettings,
     private readonly saveSettings: () => Promise<void>,
+    private readonly lifecycle?: OllamaLifecycle,
   ) {
     super(app, plugin);
   }
@@ -171,6 +173,55 @@ export class GemmeraSettingsTab extends PluginSettingTab {
         toggle.onChange(async (value: boolean) => {
           this.settings.alwaysPreviewBeforeSave = value;
           await this.saveSettings();
+        });
+      });
+
+    // ── Ollama ────────────────────────────────────────────────────────────────
+    containerEl.createEl("h2", { text: "Gemmera — Ollama" });
+
+    new Setting(containerEl)
+      .setName("Ollama path")
+      .setDesc("auto: find ollama on PATH. manual: provide an explicit path.")
+      .addDropdown((dd: { addOption: (v: string, l: string) => unknown; setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown }) => {
+        dd.addOption("auto", "Auto (PATH lookup)");
+        dd.addOption("manual", "Manual path");
+        dd.setValue(this.settings.ollamaPathMode);
+        dd.onChange(async (value: string) => {
+          this.settings.ollamaPathMode = value as "auto" | "manual";
+          await this.saveSettings();
+          this.display(); // re-render to show/hide path field
+        });
+      });
+
+    if (this.settings.ollamaPathMode === "manual") {
+      new Setting(containerEl)
+        .setName("Ollama binary path")
+        .setDesc("Full path to the ollama binary, e.g. /usr/local/bin/ollama")
+        .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+          text.setPlaceholder?.("/usr/local/bin/ollama");
+          text.setValue(this.settings.ollamaPath);
+          text.onChange(async (value: string) => {
+            this.settings.ollamaPath = value;
+            await this.saveSettings();
+          });
+        });
+    }
+
+    // ── Advanced ──────────────────────────────────────────────────────────────
+    containerEl.createEl("h3", { text: "Advanced" });
+
+    new Setting(containerEl)
+      .setName("Restart Ollama")
+      .setDesc("Stop and re-spawn Ollama. Disabled while a restart is already in progress.")
+      .addButton((btn: { setButtonText: (t: string) => unknown; setDisabled: (d: boolean) => unknown; onClick: (cb: () => void) => unknown; setCta?: () => unknown }) => {
+        const inFlight = this.lifecycle?.inFlight ?? false;
+        btn.setButtonText("Restart");
+        btn.setDisabled(inFlight);
+        btn.onClick(async () => {
+          if (!this.lifecycle) return;
+          await this.lifecycle.restart();
+          new Notice("Gemmera: Ollama restarted");
+          await this.refresh();
         });
       });
   }
