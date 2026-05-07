@@ -8,6 +8,8 @@ export interface ClassifierDecision {
   skipReason?: string;
   latencyMs: number;
   promptVersion: string;
+  /** True when the classifier failed (timeout/parse error) and fell back to the default label. */
+  failed?: boolean;
 }
 
 export interface ClassifyOptions {

@@ -8,7 +8,7 @@ import type {
 import { DEFAULT_THRESHOLDS } from "../contracts/classifier";
 
 const PROMPT_VERSION = "v1.0";
-const TIMEOUT_MS = 500;
+const TIMEOUT_MS = 2000;
 const DEFAULT_BASE = "http://127.0.0.1:11434";
 const DEFAULT_MODEL = "gemma3:latest";
 
@@ -159,7 +159,7 @@ export class OllamaClassifierService implements ClassifierService {
       }
     }
 
-    // Fallback: route to ask, caller shows disambiguation chip
+    // Fallback: route to ask silently — caller must NOT show disambiguation chip
     return {
       label: "ask",
       confidence: 0,
@@ -167,6 +167,7 @@ export class OllamaClassifierService implements ClassifierService {
       source: "llm",
       latencyMs: Date.now() - start,
       promptVersion: PROMPT_VERSION,
+      failed: true,
     };
   }
 
