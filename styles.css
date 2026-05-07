@@ -82,6 +82,35 @@
   align-self: flex-end;
 }
 
+/* ── Citation chips ───────────────────────────────────────────────────────── */
+.gemmera-citations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 0.72rem;
+}
+
+.gemmera-citations__label {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.gemmera-citations__chip {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.gemmera-citations__chip:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+  color: var(--text-normal);
+}
+
 /* ── Turn wrapper ─────────────────────────────────────────────────────────── */
 .gemmera-turn {
   display: flex;
