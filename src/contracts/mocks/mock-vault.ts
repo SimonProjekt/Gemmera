@@ -53,6 +53,19 @@ export class MockVaultService implements VaultService {
     return { mtime: this.mtimes.get(path) ?? 0, size: content.length };
   }
 
+  async trash(path: string): Promise<void> {
+    if (!this.files.has(path)) throw new Error(`File not found: ${path}`);
+    this.files.delete(path);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    const content = this.files.get(from);
+    if (content === undefined) throw new Error(`File not found: ${from}`);
+    if (this.files.has(to)) throw new Error(`File already exists: ${to}`);
+    this.files.delete(from);
+    this.files.set(to, content);
+  }
+
   setMtime(path: string, mtime: number): void {
     this.mtimes.set(path, mtime);
   }

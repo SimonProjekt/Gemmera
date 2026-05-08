@@ -27,4 +27,16 @@ export interface VaultService {
    * changed.
    */
   stat(path: string): Promise<VaultStat>;
+  /**
+   * Moves the file to the system trash (Finder Trash on macOS, Recycle
+   * Bin on Windows). Never a permanent delete; the user can restore the
+   * file from the OS trash UI. Throws if the file does not exist.
+   */
+  trash(path: string): Promise<void>;
+  /**
+   * Renames or moves a file. In the real vault this delegates to
+   * `FileManager.renameFile` so all incoming wikilinks update atomically.
+   * Throws if `from` does not exist or `to` already exists.
+   */
+  rename(from: string, to: string): Promise<void>;
 }

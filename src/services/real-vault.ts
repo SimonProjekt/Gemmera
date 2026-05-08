@@ -48,6 +48,16 @@ export class ObsidianVaultService implements VaultService {
     );
   }
 
+  async trash(path: string): Promise<void> {
+    const file = this.requireFile(path);
+    await this.app.vault.trash(file, true);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    const file = this.requireFile(from);
+    await this.app.fileManager.renameFile(file, to);
+  }
+
   private requireFile(path: string): TFile {
     const file = this.app.vault.getFileByPath(path);
     if (!file) throw new Error(`File not found: ${path}`);

@@ -1,5 +1,6 @@
 import { Notice, PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 import type { DriftReport, IngestionStore } from "../contracts";
+import { HARD_STOPS } from "../contracts/hard-stops";
 import type { RunnerControls } from "../services/runner-controls";
 import type { ScheduledReconciler } from "../services/scheduled-reconciler";
 import type { GemmeraSettings } from "../settings";
@@ -157,6 +158,23 @@ export class GemmeraSettingsTab extends PluginSettingTab {
           const parsed = Number(value);
           if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return;
           this.settings.dedupThreshold = parsed;
+          await this.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Turn timeout (seconds)")
+      .setDesc(
+        `Wall-clock budget per chat turn. Default 120 s, max ${HARD_STOPS.WALL_CLOCK_MS_MAX / 1000} s. Increase on slow hardware.`,
+      )
+      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+        text.setPlaceholder?.("120");
+        text.setValue(String(this.settings.turnTimeoutMs / 1000));
+        text.onChange(async (value: string) => {
+          const secs = Number(value);
+          if (!Number.isFinite(secs) || secs <= 0) return;
+          const ms = Math.min(secs * 1000, HARD_STOPS.WALL_CLOCK_MS_MAX);
+          this.settings.turnTimeoutMs = ms;
           await this.saveSettings();
         });
       });
