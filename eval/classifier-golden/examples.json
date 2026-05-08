@@ -1,0 +1,343 @@
+[
+  {
+    "id": "c001",
+    "input": {
+      "messageText": "Spara detta som en mötesanteckning om Q2-planering",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Explicit save instruction with content type and purpose"
+  },
+  {
+    "id": "c002",
+    "input": {
+      "messageText": "Lägg till det här i min läslogg",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Explicit add-to-vault instruction with named destination"
+  },
+  {
+    "id": "c003",
+    "input": {
+      "messageText": "Kan du skapa en ny anteckning om min löpning idag? 10 km på 52 minuter, personbästa.",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Create-note request with concrete data to save"
+  },
+  {
+    "id": "c004",
+    "input": {
+      "messageText": "Arkivera det här mejlet som en anteckning i projektet",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Archive/save framing, Swedish"
+  },
+  {
+    "id": "c005",
+    "input": {
+      "messageText": "",
+      "attachmentKinds": ["pdf"],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Attachment-only with no text — skip path routes to capture"
+  },
+  {
+    "id": "c006",
+    "input": {
+      "messageText": "Notera att jag träffade Erik idag vid kaffeautomaten. Han funderar på att byta jobb.",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Note-taking / journaling framing"
+  },
+  {
+    "id": "c007",
+    "input": {
+      "messageText": "Skriv ner det här om bokhylleprojektet: fix för list-kommandot är klar, sortering funkar nu.",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "capture",
+    "notes": "Write-down instruction with project context and specific content"
+  },
+  {
+    "id": "c008",
+    "input": {
+      "messageText": "spara det istället",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": [
+        { "userText": "Vad vet jag om bokhylleprojektet?", "label": "ask" },
+        { "userText": "berätta mer", "label": "ask" }
+      ]
+    },
+    "expectedLabel": "capture",
+    "notes": "Follow-up capture after two ask turns — 'save that instead'"
+  },
+  {
+    "id": "a001",
+    "input": {
+      "messageText": "Vad vet jag om bokhylleprojektet?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "Direct vault query, Swedish"
+  },
+  {
+    "id": "a002",
+    "input": {
+      "messageText": "Vad har jag skrivit om min pappa?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "Personal vault recall query"
+  },
+  {
+    "id": "a003",
+    "input": {
+      "messageText": "Berätta om min vandring i Sundsvall",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "Recall / retrieve from vault"
+  },
+  {
+    "id": "a004",
+    "input": {
+      "messageText": "Vilka böcker har jag läst i år?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "List query over vault content"
+  },
+  {
+    "id": "a005",
+    "input": {
+      "messageText": "? Vad tänkte jag om The Dispossessed?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "Leading ? — skip path routes to ask"
+  },
+  {
+    "id": "a006",
+    "input": {
+      "messageText": "Vad handlar det öppna dokumentet om?",
+      "attachmentKinds": [],
+      "activeFileName": "dagbok_2026-03-02",
+      "activeFileTitle": "2 mars 2026",
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "Query with active-file context — asking about currently open note"
+  },
+  {
+    "id": "a007",
+    "input": {
+      "messageText": "mer detaljer om det",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": [
+        { "userText": "Vad har jag skrivit om min pappa?", "label": "ask" }
+      ]
+    },
+    "expectedLabel": "ask",
+    "notes": "Follow-up ask using prior-turn context — 'more detail'"
+  },
+  {
+    "id": "a008",
+    "input": {
+      "messageText": "What did I write about my father?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "ask",
+    "notes": "English vault query — same intent as a004 but different language"
+  },
+  {
+    "id": "m001",
+    "input": {
+      "messageText": "Spara dessa mötesanteckningar och berätta vad vi beslutade förra veckan",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "mixed",
+    "notes": "Explicit save + recall in one message"
+  },
+  {
+    "id": "m002",
+    "input": {
+      "messageText": "Lägg till det här och sök sedan efter relaterade anteckningar om projektet",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "mixed",
+    "notes": "Save + search request chained"
+  },
+  {
+    "id": "m003",
+    "input": {
+      "messageText": "Arkivera detta och sammanfatta sedan vad jag vet om migrationsuppdraget",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "mixed",
+    "notes": "Archive + summarize existing knowledge"
+  },
+  {
+    "id": "m004",
+    "input": {
+      "messageText": "Save this meeting note and also show me what I know about David",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "mixed",
+    "notes": "English mixed — explicit save + retrieve"
+  },
+  {
+    "id": "m005",
+    "input": {
+      "messageText": "Notera det här och hitta sedan liknande anteckningar i vaulten",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "mixed",
+    "notes": "Note + find-similar pattern"
+  },
+  {
+    "id": "m006",
+    "input": {
+      "messageText": "Lägg in detta i min läslogg och ge mig en översikt av allt jag har om Le Guin",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "mixed",
+    "notes": "Add to log + retrieve existing — named author makes retrieval half clear"
+  },
+  {
+    "id": "x001",
+    "input": {
+      "messageText": "Hur använder jag Gemmera?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "meta",
+    "notes": "Classic how-to-use-the-app question"
+  },
+  {
+    "id": "x002",
+    "input": {
+      "messageText": "Vad kan du göra?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "meta",
+    "notes": "Capability question about the assistant"
+  },
+  {
+    "id": "x003",
+    "input": {
+      "messageText": "Hur raderar jag en anteckning?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "meta",
+    "notes": "Feature/UI question about the app"
+  },
+  {
+    "id": "x004",
+    "input": {
+      "messageText": "Vad är skillnaden mellan att spara och att fråga?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "meta",
+    "notes": "Conceptual question about the app's two modes"
+  },
+  {
+    "id": "x005",
+    "input": {
+      "messageText": "Hur fungerar sökningen i min vault?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "meta",
+    "notes": "Feature question about retrieval mechanism"
+  },
+  {
+    "id": "e001",
+    "input": {
+      "messageText": "Kan du hjälpa mig?",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": []
+    },
+    "expectedLabel": "meta",
+    "notes": "Ambiguous: could be meta or ask — best label is meta since there is no vault query"
+  },
+  {
+    "id": "e002",
+    "input": {
+      "messageText": "det där",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": [
+        { "userText": "Vad vet jag om bokhylleprojektet?", "label": "ask" },
+        { "userText": "mer detaljer", "label": "ask" }
+      ]
+    },
+    "expectedLabel": "ask",
+    "notes": "Minimal follow-up referencing prior ask — classifier must use recentTurns context"
+  },
+  {
+    "id": "e003",
+    "input": {
+      "messageText": "spara det",
+      "attachmentKinds": [],
+      "activeFileName": null,
+      "recentTurns": [
+        { "userText": "Vad tänkte jag om The Dispossessed?", "label": "ask" }
+      ]
+    },
+    "expectedLabel": "capture",
+    "notes": "Ambiguous short follow-up — 'save it' after an ask turn; prior turn context resolves to capture"
+  }
+]
