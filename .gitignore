@@ -39,3 +39,6 @@ __pycache__/
 
 # Worktrees (subagents) — kept out of the main checkout
 /.worktrees/
+
+# Classifier eval timestamped run output
+eval/runs/

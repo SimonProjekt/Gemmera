@@ -7,7 +7,10 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:classifier": "tsx eval/runner/classify.ts",
+    "eval:classifier:mock": "tsx eval/runner/classify.ts --mock",
+    "eval:classifier:ci": "tsx eval/runner/classify.ts --mock --compare eval/classifier-golden/baseline-mock.json"
   },
   "dependencies": {
     "ajv": "^8.20.0"
@@ -17,6 +20,7 @@
     "builtin-modules": "4.0.0",
     "esbuild": "0.24.2",
     "obsidian": "latest",
+    "tsx": "^4.19.2",
     "typescript": "5.6.3",
     "vitest": "^2.1.9"
   }
