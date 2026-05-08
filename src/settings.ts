@@ -28,6 +28,18 @@ export interface GemmeraSettings {
   dedupThreshold: number;
 
   /**
+   * "auto" = find ollama on PATH. "manual" = use ollamaPath.
+   * Wired to Settings → Ollama → path mode (#28).
+   */
+  ollamaPathMode: "auto" | "manual";
+
+  /**
+   * Explicit path to the Ollama binary. Only used when ollamaPathMode = "manual".
+   * Example: "/usr/local/bin/ollama"
+   */
+  ollamaPath: string;
+
+  /**
    * Wall-clock budget per turn in milliseconds. Clamped to
    * HARD_STOPS.WALL_CLOCK_MS_MAX (300 000 ms) on load. Other hard-stop
    * ceilings (tool calls, no-ops, retries) are constants and not exposed here.
@@ -41,5 +53,7 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   alwaysPreviewBeforeSave: true,
   inboxFolder: "Inbox/",
   dedupThreshold: 0.85,
+  ollamaPathMode: "auto",
+  ollamaPath: "",
   turnTimeoutMs: 120_000,
 };

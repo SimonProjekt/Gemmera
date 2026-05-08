@@ -16,6 +16,8 @@ import type {
 import { parseContent } from "./ingest-parser";
 import { decideStrategy } from "./ingest-strategy";
 import { IngestWriter } from "./ingest-writer";
+import type { TurnStatusCallback } from "./turn-status";
+import { labelForState } from "./turn-status";
 import { unique } from "./util";
 
 const STATES = {
@@ -69,6 +71,8 @@ export interface IngestOrchestratorDeps {
   eventLog?: EventLog;
   /** Turn id used for event-log entries. Defaults to a fresh uuid. */
   turnId?: string;
+  /** Called synchronously on each state entry so the UI can update its status chip. */
+  onStateChange?: TurnStatusCallback;
   inboxFolder?: string;
   dedupThreshold?: number;
   alwaysPreview?: boolean;
@@ -99,6 +103,7 @@ export async function runIngest(
   // from the state the classifier left on exit.
   let prevState = "CLASSIFY_INTENT";
   const enter = async (state: string, payload?: Record<string, unknown>) => {
+    deps.onStateChange?.(state, labelForState(state));
     if (!deps.eventLog) return;
     const entry: EventLogEntry = {
       turnId,
