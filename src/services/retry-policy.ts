@@ -14,7 +14,7 @@ import { HARD_STOPS } from "../contracts";
 export class RetryBudget {
   private used = 0;
 
-  constructor(private readonly max = HARD_STOPS.MAX_RETRIES_PER_TURN) {}
+  constructor(private readonly max: number = HARD_STOPS.MAX_RETRIES_PER_TURN) {}
 
   /** True when at least one retry remains. */
   canRetry(): boolean {

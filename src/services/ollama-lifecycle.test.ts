@@ -137,11 +137,11 @@ describe("start() — Ollama not running, spawn", () => {
   });
 
   it("passes OLLAMA_HOST in environment", async () => {
-    let capturedOpts: Record<string, unknown> | null = null;
-    const spawnFn = vi.fn((cmd, args, opts) => { capturedOpts = opts; return makeChild(); });
+    const captured: { opts: Record<string, unknown> | null } = { opts: null };
+    const spawnFn = vi.fn((cmd, args, opts) => { captured.opts = opts; return makeChild(); });
     const lc = new OllamaLifecycle(baseDeps({ spawnFn }));
     await lc.start();
-    expect((capturedOpts?.env as Record<string, string>)?.OLLAMA_HOST).toBe("127.0.0.1:11434");
+    expect((captured.opts?.env as Record<string, string>)?.OLLAMA_HOST).toBe("127.0.0.1:11434");
   });
 
   it("sets not_installed when spawn throws ENOENT", async () => {
@@ -188,9 +188,9 @@ describe("start() — Ollama not running, spawn", () => {
 describe("stop()", () => {
   it("kills child with SIGTERM when spawnedByPlugin=true", async () => {
     const child = makeChild();
-    let killCb: (() => void) | null = null;
+    const killCb: { fn: (() => void) | null } = { fn: null };
     child.once = (_evt, cb: (code: number | null) => void) => {
-      killCb = () => cb(0);
+      killCb.fn = () => cb(0);
     };
     let healthCalls = 0;
     const lc = new OllamaLifecycle(baseDeps({
@@ -204,7 +204,7 @@ describe("stop()", () => {
     expect(lc.status).toBe("ready");
     // Kill and resolve the exit promise.
     const stopPromise = lc.stop();
-    killCb?.();
+    killCb.fn?.();
     await stopPromise;
     expect(child.killSignals).toContain("SIGTERM");
   });
@@ -252,37 +252,37 @@ describe("stop()", () => {
 
 describe("health loop", () => {
   it("one failure does not flip to not_responding", async () => {
-    let healthTick: (() => Promise<void>) | null = null;
+    const healthTick: { fn: (() => Promise<void>) | null } = { fn: null };
     let healthCallCount = 0;
     const statuses: OllamaStatus[] = [];
     const lc = new OllamaLifecycle(baseDeps({
       healthFn: async () => { healthCallCount++; return healthCallCount === 1; }, // initial ok, then fails
-      setIntervalFn: (fn) => { healthTick = fn as () => Promise<void>; return 1; },
+      setIntervalFn: (fn) => { healthTick.fn = fn as () => Promise<void>; return 1; },
       onStatusChange: (s) => statuses.push(s),
     }));
     await lc.start();
     expect(lc.status).toBe("ready");
-    await healthTick?.();
-    await healthTick?.();
+    await healthTick.fn?.();
+    await healthTick.fn?.();
     expect(lc.status).toBe("ready"); // 2 failures — not yet
   });
 
   it("three consecutive failures flip to not_responding", async () => {
-    let healthTick: (() => Promise<void>) | null = null;
+    const healthTick: { fn: (() => Promise<void>) | null } = { fn: null };
     let healthCallCount = 0;
     const lc = new OllamaLifecycle(baseDeps({
       healthFn: async () => { healthCallCount++; return healthCallCount === 1; },
-      setIntervalFn: (fn) => { healthTick = fn as () => Promise<void>; return 1; },
+      setIntervalFn: (fn) => { healthTick.fn = fn as () => Promise<void>; return 1; },
     }));
     await lc.start();
-    await healthTick?.();
-    await healthTick?.();
-    await healthTick?.();
+    await healthTick.fn?.();
+    await healthTick.fn?.();
+    await healthTick.fn?.();
     expect(lc.status).toBe("not_responding");
   });
 
   it("recovery after not_responding clears status back to ready", async () => {
-    let healthTick: (() => Promise<void>) | null = null;
+    const healthTick: { fn: (() => Promise<void>) | null } = { fn: null };
     let healthCallCount = 0;
     const lc = new OllamaLifecycle(baseDeps({
       healthFn: async () => {
@@ -292,21 +292,21 @@ describe("health loop", () => {
         if (healthCallCount <= 4) return false;
         return true;
       },
-      setIntervalFn: (fn) => { healthTick = fn as () => Promise<void>; return 1; },
+      setIntervalFn: (fn) => { healthTick.fn = fn as () => Promise<void>; return 1; },
     }));
     await lc.start();
-    await healthTick?.(); await healthTick?.(); await healthTick?.();
+    await healthTick.fn?.(); await healthTick.fn?.(); await healthTick.fn?.();
     expect(lc.status).toBe("not_responding");
-    await healthTick?.();
+    await healthTick.fn?.();
     expect(lc.status).toBe("ready");
   });
 
   it("skips health check while inFlight", async () => {
-    let healthTick: (() => Promise<void>) | null = null;
+    const healthTick: { fn: (() => Promise<void>) | null } = { fn: null };
     let healthCalls = 0;
     const lc = new OllamaLifecycle(baseDeps({
       healthFn: async () => { healthCalls++; return true; },
-      setIntervalFn: (fn) => { healthTick = fn as () => Promise<void>; return 1; },
+      setIntervalFn: (fn) => { healthTick.fn = fn as () => Promise<void>; return 1; },
     }));
     await lc.start();
     const callsBefore = healthCalls;
@@ -314,7 +314,7 @@ describe("health loop", () => {
     // We can't easily test this without more complex setup, so we test the guard
     // indirectly: stopping sets stopping=true which also skips health checks.
     lc["stopping"] = true;
-    await healthTick?.();
+    await healthTick.fn?.();
     expect(healthCalls).toBe(callsBefore); // no extra call while stopping
   });
 });

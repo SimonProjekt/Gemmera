@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Plugin, WorkspaceLeaf, type StatusBarItem } from "obsidian";
+import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { OllamaLifecycle, type OllamaStatus } from "./services/ollama-lifecycle";
@@ -9,12 +9,12 @@ export default class GemmeraPlugin extends Plugin {
   private services!: Services;
   settings!: GemmeraSettings;
   private lifecycle!: OllamaLifecycle;
-  private statusBarEl!: StatusBarItem;
+  private statusBarEl!: HTMLElement;
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.statusBarEl = this.addStatusBarItem();
-    this.statusBarEl.setText("Cowork: detecting…");
+    this.statusBarEl.setText("Gemmera: detecting…");
     this.lifecycle = new OllamaLifecycle({
       ollamaCmd: this.settings.ollamaPathMode === "manual" && this.settings.ollamaPath
         ? this.settings.ollamaPath
@@ -156,11 +156,11 @@ export default class GemmeraPlugin extends Plugin {
 
 function ollamaStatusLabel(status: OllamaStatus): string {
   switch (status) {
-    case "detecting":     return "Cowork: detecting…";
-    case "starting":      return "Cowork: starting…";
-    case "ready":         return "Cowork: ready";
-    case "not_responding": return "Cowork: Ollama not responding — click to restart";
-    case "restarting":    return "Cowork: restarting…";
-    case "not_installed": return "Cowork: Ollama not found";
+    case "detecting":     return "Gemmera: detecting…";
+    case "starting":      return "Gemmera: starting…";
+    case "ready":         return "Gemmera: ready";
+    case "not_responding": return "Gemmera: Ollama not responding — click to restart";
+    case "restarting":    return "Gemmera: restarting…";
+    case "not_installed": return "Gemmera: Ollama not found";
   }
 }
