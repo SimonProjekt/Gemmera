@@ -176,7 +176,7 @@ async function consultLlm(
 const STRATEGY_HINT = `
 
 Return ONLY a JSON object with this shape:
-{ "strategy": "new" | "append" | "ask_user", "targetPath"?: string, "reason": string }
+{ "strategy": "new" | "append" | "ask_user" | "split", "targetPath"?: string, "reason": string }
 
 Rules:
 - "new" when the candidate is genuinely distinct from the similar notes.
@@ -184,6 +184,8 @@ Rules:
   candidate would naturally extend it. Provide its path in "targetPath".
 - "ask_user" when there's a near-duplicate but you're not sure whether to
   append or branch off. Provide the closest match in "targetPath".
+- "split" when the candidate clearly covers multiple unrelated topics that
+  should each become their own note (no "targetPath" needed).
 `;
 
 function interpret(
@@ -201,11 +203,38 @@ function interpret(
     const score = hits.find((h) => h.path === target)?.score ?? 0;
     return { kind: "dedup_ask", target, similarity: score };
   }
+  if (strategy === "split") {
+    const candidates = splitSpecByHeadings(spec);
+    if (candidates.length > 1) return { kind: "split", candidates };
+    // Degenerate: no headings to split on — fall through to create.
+  }
   if (strategy === "new") {
     const related = unique([...spec.related, ...hits.slice(0, 3).map((h) => h.path)]);
     return { kind: "create", related };
   }
   return null;
+}
+
+/**
+ * Splits a spec's body_markdown on level-2 headings. Each `## Heading`
+ * becomes a candidate NoteSpec with the heading as title and the section
+ * body as body_markdown. Returns a single-element array (the original spec)
+ * when no level-2 headings are found.
+ */
+function splitSpecByHeadings(spec: NoteSpec): NoteSpec[] {
+  const sections = spec.body_markdown.split(/(?=^## )/m);
+  if (sections.length <= 1) return [spec];
+
+  const candidates: NoteSpec[] = [];
+  for (const section of sections) {
+    const headingMatch = section.match(/^## (.+)\n([\s\S]*)$/);
+    if (!headingMatch) continue;
+    const title = headingMatch[1].trim();
+    const body = headingMatch[2].trim();
+    if (!title || !body) continue;
+    candidates.push({ ...spec, title, body_markdown: body, summary: body.slice(0, 200) });
+  }
+  return candidates.length > 0 ? candidates : [spec];
 }
 
 function sha256(s: string): string {

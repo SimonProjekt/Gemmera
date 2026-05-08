@@ -55,11 +55,15 @@ export interface NoteSpec {
  * - `append`: append the body under a dated heading in `target`.
  * - `dedup_ask`: a near or exact duplicate exists; the preview modal asks
  *    the user to append, save anyway, or cancel. `target` is the matched note.
+ * - `split`: the content covers multiple distinct topics. `candidates` are
+ *    the individual NoteSpecs derived from each section. The preview shows
+ *    them as a list; the user confirms each independently or all-at-once.
  */
 export type IngestStrategy =
   | { kind: "create"; related: string[] }
   | { kind: "append"; target: string }
-  | { kind: "dedup_ask"; target: string; similarity: number };
+  | { kind: "dedup_ask"; target: string; similarity: number }
+  | { kind: "split"; candidates: NoteSpec[] };
 
 /** What the user picked in the dedup modal. */
 export type DedupChoice = "append" | "save_anyway" | "cancel";
@@ -73,6 +77,7 @@ export interface IngestInput {
 
 export type IngestOutcome =
   | { kind: "saved"; path: string; mode: "create" | "append"; spec: NoteSpec }
+  | { kind: "split_saved"; paths: string[]; specs: NoteSpec[] }
   | { kind: "skipped_existing"; path: string; reason: "exact_duplicate" }
   | { kind: "cancelled" }
   | { kind: "failed"; reason: string };

@@ -38,6 +38,13 @@ export interface GemmeraSettings {
    * Example: "/usr/local/bin/ollama"
    */
   ollamaPath: string;
+
+  /**
+   * Wall-clock budget per turn in milliseconds. Clamped to
+   * HARD_STOPS.WALL_CLOCK_MS_MAX (300 000 ms) on load. Other hard-stop
+   * ceilings (tool calls, no-ops, retries) are constants and not exposed here.
+   */
+  turnTimeoutMs: number;
 }
 
 export const DEFAULT_SETTINGS: GemmeraSettings = {
@@ -48,4 +55,5 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   dedupThreshold: 0.85,
   ollamaPathMode: "auto",
   ollamaPath: "",
+  turnTimeoutMs: 120_000,
 };

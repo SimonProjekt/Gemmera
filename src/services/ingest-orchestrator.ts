@@ -33,17 +33,20 @@ const STATES = {
 } as const;
 
 export interface IngestPreview {
-  /** "save" | "append" | "dedup" — drives which buttons the preview shows. */
-  kind: "save" | "append" | "dedup";
+  /** Drives which buttons the preview shows. */
+  kind: "save" | "append" | "dedup" | "split";
   spec: NoteSpec;
   strategy: IngestStrategy;
+  /** Only set when kind === "split". All split candidates. */
+  candidates?: NoteSpec[];
 }
 
 export type PreviewDecision =
   | { action: "confirm" }
   | { action: "edit"; spec: NoteSpec }
   | { action: "cancel" }
-  | { action: "dedup_choice"; choice: DedupChoice };
+  | { action: "dedup_choice"; choice: DedupChoice }
+  | { action: "split_confirm"; confirmed: NoteSpec[] };
 
 export type PreviewHandler = (
   preview: IngestPreview,
@@ -96,6 +99,8 @@ export async function runIngest(
   deps: IngestOrchestratorDeps,
 ): Promise<IngestOutcome> {
   const turnId = deps.turnId ?? freshTurnId();
+  // Classification happens upstream (classifier-orchestrator); ingest picks up
+  // from the state the classifier left on exit.
   let prevState = "CLASSIFY_INTENT";
   const enter = async (state: string, payload?: Record<string, unknown>) => {
     deps.onStateChange?.(state, labelForState(state));
@@ -159,12 +164,52 @@ export async function runIngest(
 
   // ── PREVIEW ──────────────────────────────────────────────────────────
   // Bypass when the user has opted out of always-preview AND the case is
-  // unambiguous: a plain create with high confidence. Append and dedup_ask
-  // always preview — they touch existing notes.
+  // unambiguous: a plain create with high confidence. Append, dedup_ask,
+  // and split always preview — they touch existing notes or write multiple.
   const skipPreview =
     deps.alwaysPreview === false &&
     strategy.kind === "create" &&
     spec.cowork.confidence === "high";
+
+  // ── SPLIT PREVIEW ─────────────────────────────────────────────────────
+  if (strategy.kind === "split") {
+    await enter(STATES.preview, { kind: "split", count: strategy.candidates.length });
+    const result = await deps.preview({
+      kind: "split",
+      spec: strategy.candidates[0] ?? spec,
+      strategy,
+      candidates: strategy.candidates,
+    });
+    if (result.action === "cancel") {
+      await enter(STATES.cancelled, { from: "split_preview" });
+      return { kind: "cancelled" };
+    }
+    if (result.action !== "split_confirm") {
+      await enter(STATES.failed, { reason: "invalid_split_action" });
+      return { kind: "failed", reason: "invalid_split_action" };
+    }
+    const confirmed = result.confirmed;
+
+    // ── WRITE (split) ──────────────────────────────────────────────────
+    await enter(STATES.write, { kind: "split", count: confirmed.length });
+    const paths: string[] = [];
+    const specs: NoteSpec[] = [];
+    for (const candidate of confirmed) {
+      try {
+        const written = await deps.writer.writeNew(candidate, { folder: deps.inboxFolder });
+        paths.push(written.path);
+        specs.push(candidate);
+        deps.jobQueue.enqueue({ kind: "index", path: written.path });
+      } catch (err) {
+        const reason = `write:${stringifyError(err)}`;
+        await enter(STATES.failed, { reason });
+        return { kind: "failed", reason };
+      }
+    }
+    await enter(STATES.updateIndex, { paths });
+    await enter(STATES.done, { mode: "split", count: paths.length });
+    return { kind: "split_saved", paths, specs };
+  }
 
   if (!skipPreview) {
     await enter(STATES.preview, { kind: previewKindFor(strategy) });
@@ -263,6 +308,7 @@ function freshTurnId(): string {
 function previewKindFor(strategy: IngestStrategy): IngestPreview["kind"] {
   if (strategy.kind === "dedup_ask") return "dedup";
   if (strategy.kind === "append") return "append";
+  if (strategy.kind === "split") return "split";
   return "save";
 }
 

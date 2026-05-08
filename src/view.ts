@@ -193,6 +193,10 @@ export class GemmeraChatView extends ItemView {
         const verb = outcome.mode === "append" ? "Appended to" : "Saved to";
         new Notice(`Gemmera: ${verb} ${outcome.path}`);
         this.appendMessage("assistant", `${verb} **${outcome.path}**`);
+      } else if (outcome.kind === "split_saved") {
+        new Notice(`Gemmera: saved ${outcome.paths.length} notes`);
+        const list = outcome.paths.map((p) => `- **${p}**`).join("\n");
+        this.appendMessage("assistant", `Saved ${outcome.paths.length} notes:\n${list}`);
       } else if (outcome.kind === "cancelled") {
         this.appendMessage("assistant", "Cancelled.");
       } else if (outcome.kind === "skipped_existing") {
