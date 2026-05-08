@@ -48,7 +48,7 @@ class DeleteConfirmModal extends Modal {
     }
 
     contentEl.createEl("p", {
-      text: "This will move the note to the Obsidian trash. You can restore it from there.",
+      text: "This will move the note to your system trash (Finder Trash / Recycle Bin). You can restore it from there.",
       cls: "gemmera-delete-hint",
     });
 

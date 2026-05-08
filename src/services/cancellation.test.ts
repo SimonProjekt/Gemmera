@@ -83,10 +83,10 @@ describe("cancellation — cancel during GENERATE", () => {
     await sm2.dispatch({ kind: "tool_result", name: "reranked" });
 
     expect(capturedSignal).not.toBeNull();
-    expect((capturedSignal as AbortSignal).aborted).toBe(false);
+    expect(capturedSignal!.aborted).toBe(false);
 
     await sm2.cancel();
-    expect((capturedSignal as AbortSignal).aborted).toBe(true);
+    expect(capturedSignal!.aborted).toBe(true);
   });
 
   it("abort signal fires when cancelled during a long tool call in RETRIEVE", async () => {
@@ -105,10 +105,10 @@ describe("cancellation — cancel during GENERATE", () => {
     await sm.startTurn("t1");
     // Still in RETRIEVE (tool call is in flight).
     expect(capturedSignal).not.toBeNull();
-    expect((capturedSignal as AbortSignal).aborted).toBe(false);
+    expect(capturedSignal!.aborted).toBe(false);
 
     await sm.cancel();
-    expect((capturedSignal as AbortSignal).aborted).toBe(true);
+    expect(capturedSignal!.aborted).toBe(true);
   });
 });
 

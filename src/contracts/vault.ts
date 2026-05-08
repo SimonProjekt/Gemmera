@@ -28,8 +28,9 @@ export interface VaultService {
    */
   stat(path: string): Promise<VaultStat>;
   /**
-   * Moves the file to Obsidian's trash (`.trash/`). Never a permanent delete.
-   * Throws if the file does not exist.
+   * Moves the file to the system trash (Finder Trash on macOS, Recycle
+   * Bin on Windows). Never a permanent delete; the user can restore the
+   * file from the OS trash UI. Throws if the file does not exist.
    */
   trash(path: string): Promise<void>;
   /**
