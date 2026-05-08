@@ -132,6 +132,8 @@ export interface EventLogEntry {
   fromState: string | null;
   timestamp: number;
   triggeringEvent: StateMachineEvent | null;
+  /** Set on mixed-intent turns to distinguish which phase produced the entry. */
+  phase?: "ingest" | "query";
 }
 
 // Implementations must guarantee that any entry passed to a fully-resolved

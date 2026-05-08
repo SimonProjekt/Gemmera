@@ -8,6 +8,7 @@ import { parseFileOps, handleFileOps } from "./fileops";
 import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
 import { runIngest } from "./services/ingest-orchestrator";
+import { runMixed } from "./services/mixed-orchestrator";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
@@ -178,6 +179,15 @@ export class GemmeraChatView extends ItemView {
       return;
     }
 
+    // ── Mixed (#47) ───────────────────────────────────────────────────
+    if (intent === "mixed") {
+      await this.runMixed(text, turnId);
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "mixed" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
     // ── Chat ──────────────────────────────────────────────────────────
     await this.runChat(text, intent, turnId, route ?? null);
   }
@@ -222,6 +232,71 @@ export class GemmeraChatView extends ItemView {
         this.appendMessage("assistant", `Capture failed: ${outcome.reason}`);
       }
     } catch (err) {
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    }
+  }
+
+  private async runMixed(text: string, turnId: string): Promise<void> {
+    this.appendMessage("user", text);
+
+    const ingestStatusEl = this.messagesEl.createEl("div", {
+      cls: "gemmera-mixed-status gemmera-mixed-status--ingest",
+      text: "Saving note…",
+    });
+    const queryStatusEl = this.messagesEl.createEl("div", {
+      cls: "gemmera-mixed-status gemmera-mixed-status--query",
+      text: "Searching notes…",
+    });
+    queryStatusEl.style.display = "none";
+
+    try {
+      const outcome = await runMixed(text, {
+        llm: this.services.llm,
+        promptLoader: this.services.promptLoader,
+        retriever: this.services.retriever,
+        store: this.services.ingestionStore,
+        vault: this.services.vault,
+        writer: this.services.ingestWriter,
+        jobQueue: this.services.jobQueue,
+        preview: (preview) => openIngestPreview(this.app, preview),
+        assembler: this.services.payloadAssembler,
+        eventLog: this.services.eventLog,
+        turnId,
+        inboxFolder: this.settings.inboxFolder,
+        dedupThreshold: this.settings.dedupThreshold,
+        alwaysPreview: this.settings.alwaysPreviewBeforeSave,
+        onStateChange: (state, label, phase) => {
+          if (phase === "ingest") {
+            ingestStatusEl.textContent = label;
+          } else {
+            queryStatusEl.style.display = "";
+            queryStatusEl.textContent = label;
+          }
+        },
+      });
+
+      this.services.runnerStatus.recompute();
+      ingestStatusEl.remove();
+      queryStatusEl.remove();
+
+      if (outcome.kind === "cancelled") {
+        this.appendMessage("assistant", "Cancelled.");
+      } else if (outcome.kind === "failed") {
+        const phaseLabel = outcome.phase === "ingest" ? "Save" : "Answer";
+        this.appendMessage("assistant", `${phaseLabel} failed: ${outcome.reason}`);
+      } else if (outcome.kind === "validation_failed") {
+        new Notice(`Gemmera: saved to ${outcome.savedPath}`);
+        this.appendMessage("assistant", `Saved to **${outcome.savedPath}**\n\n${outcome.answer}`);
+      } else {
+        new Notice(`Gemmera: saved to ${outcome.savedPath}`);
+        const citations = outcome.citations.length > 0
+          ? `\n\n*Sources: ${outcome.citations.map((c) => `[[${c}]]`).join(", ")}*`
+          : "";
+        this.appendMessage("assistant", `Saved to **${outcome.savedPath}**\n\n${outcome.answer}${citations}`);
+      }
+    } catch (err) {
+      ingestStatusEl.remove();
+      queryStatusEl.remove();
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     }
   }
