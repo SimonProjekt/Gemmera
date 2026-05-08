@@ -26,7 +26,7 @@ export class GemmeraChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private history: ChatMessage[] = [];
-  private model = "gemma3:latest";
+  private model = "gemma4:e4b";
 
   private chip = new DisambiguationChip();
   private chipEl: HTMLElement | null = null;
@@ -77,7 +77,7 @@ export class GemmeraChatView extends ItemView {
       attr: { role: "status", "aria-live": "polite" },
     });
     this.checkOllamaStatus(statusEl);
-    this.services.llm.pickDefaultModel().then((m) => { this.model = m; }).catch(() => {});
+    this.model = this.settings.chatModel;
 
     this.pill = new IndexingPill(this.services.runnerStatus);
     this.pill.mount(headerEl, async () => {

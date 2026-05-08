@@ -4,7 +4,7 @@ import { HARD_STOPS } from "../contracts/hard-stops";
 import type { OllamaLifecycle } from "../services/ollama-lifecycle";
 import type { RunnerControls } from "../services/runner-controls";
 import type { ScheduledReconciler } from "../services/scheduled-reconciler";
-import type { GemmeraSettings } from "../settings";
+import { DEFAULT_CHAT_MODEL, type GemmeraSettings } from "../settings";
 
 interface IndexerStateSnapshot {
   paused: boolean;
@@ -177,6 +177,20 @@ export class GemmeraSettingsTab extends PluginSettingTab {
           if (!Number.isFinite(secs) || secs <= 0) return;
           const ms = Math.min(secs * 1000, HARD_STOPS.WALL_CLOCK_MS_MAX);
           this.settings.turnTimeoutMs = ms;
+          await this.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Chat model")
+      .setDesc(
+        "Ollama tag used for chat and the intent classifier. Must be pulled (`ollama pull <tag>`). Default `gemma4:e4b`.",
+      )
+      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+        text.setPlaceholder?.(DEFAULT_CHAT_MODEL);
+        text.setValue(this.settings.chatModel);
+        text.onChange(async (value: string) => {
+          this.settings.chatModel = value.trim() || DEFAULT_CHAT_MODEL;
           await this.saveSettings();
         });
       });

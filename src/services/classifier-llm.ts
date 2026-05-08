@@ -14,7 +14,7 @@ import { ChatMessage, LLMService } from "../contracts/llm";
 import { PromptLoader } from "../contracts/prompts";
 import { assembleClassifierPrompt } from "./classifier-prompt";
 
-const CLASSIFIER_MODEL = "gemma3:latest";
+const CLASSIFIER_MODEL = "gemma4:e4b";
 const CLASSIFIER_TIMEOUT_MS = 500;
 
 /** Errors the classifier call surface can throw. */
