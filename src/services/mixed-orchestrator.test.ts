@@ -36,15 +36,6 @@ class SequenceLLM implements LLMService {
   async pickDefaultModel(): Promise<string> { return "test-model"; }
 }
 
-class AbortingLLM implements LLMService {
-  async chat(opts: ChatOptions): Promise<LLMResponse> {
-    if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    return { content: '{"answer":"x","citations":[]}' };
-  }
-  async isReachable(): Promise<LLMReachability> { return "running"; }
-  async listModels(): Promise<string[]> { return []; }
-  async pickDefaultModel(): Promise<string> { return "test-model"; }
-}
 
 class StubRetriever implements Retriever {
   constructor(private readonly hits: RetrievalHit[] = []) {}

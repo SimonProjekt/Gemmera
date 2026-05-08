@@ -65,7 +65,6 @@ export async function runMixed(
   const turnId = deps.turnId ?? crypto.randomUUID();
 
   const ingestLog = deps.eventLog ? new PhaseEventLog(deps.eventLog, "ingest") : undefined;
-  const queryLog = deps.eventLog ? new PhaseEventLog(deps.eventLog, "query") : undefined;
 
   // ── INGEST PHASE ──────────────────────────────────────────────────────
   const ingestOutcome = await runIngest(
@@ -99,7 +98,7 @@ export async function runMixed(
   }
 
   const savedPath =
-    ingestOutcome.kind === "saved"
+    ingestOutcome.kind === "saved" || ingestOutcome.kind === "skipped_existing"
       ? ingestOutcome.path
       : ingestOutcome.kind === "split_saved"
         ? (ingestOutcome.paths[0] ?? "")
@@ -109,6 +108,8 @@ export async function runMixed(
   if (deps.querySignal?.aborted) {
     return { kind: "failed", phase: "query", reason: "aborted" };
   }
+
+  const queryLog = deps.eventLog ? new PhaseEventLog(deps.eventLog, "query") : undefined;
 
   const queryOutcome = await runQuery(
     { query: text },
