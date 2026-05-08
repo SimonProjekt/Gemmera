@@ -1,4 +1,5 @@
-import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ChatHistoryStore } from "./services/chat-history";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { IntentLabel, RecentTurn, RouteDecision } from "./contracts/classifier";
 import type { Services } from "./services";
@@ -17,6 +18,7 @@ export const VIEW_TYPE = "gemmera-chat";
 export class GemmeraChatView extends ItemView {
   private messagesEl!: HTMLElement;
   private inputAreaEl!: HTMLElement;
+  private contextPanelEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private history: ChatMessage[] = [];
@@ -26,6 +28,9 @@ export class GemmeraChatView extends ItemView {
   private chipEl: HTMLElement | null = null;
   private recentTurns: RecentTurn[] = [];
   private pill: IndexingPill | null = null;
+
+  private chatHistory: ChatHistoryStore | null = null;
+  private currentSessionId: string | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -66,9 +71,12 @@ export class GemmeraChatView extends ItemView {
       }
     });
 
-    this.messagesEl = container.createEl("div", { cls: "gemmera-messages" });
+    const bodyEl = container.createEl("div", { cls: "gemmera-body" });
+    const mainEl = bodyEl.createEl("div", { cls: "gemmera-main" });
 
-    this.inputAreaEl = container.createEl("div", { cls: "gemmera-input-area" });
+    this.messagesEl = mainEl.createEl("div", { cls: "gemmera-messages" });
+
+    this.inputAreaEl = mainEl.createEl("div", { cls: "gemmera-input-area" });
     this.inputEl = this.inputAreaEl.createEl("textarea", {
       cls: "gemmera-input",
       attr: { placeholder: "Skriv ett meddelande...", rows: "3" },
@@ -84,6 +92,14 @@ export class GemmeraChatView extends ItemView {
         this.handleSend();
       }
     });
+
+    this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
+
+    const adapter = this.app.vault.adapter as FileSystemAdapter;
+    const historyPath = adapter.getFullPath(".coworkmd/chats.json");
+    this.chatHistory = new ChatHistoryStore(historyPath);
+    // Sessions are created lazily on the first persisted turn so opening the
+    // panel without sending anything doesn't accumulate empty rows in chats.json.
   }
 
   async onClose(): Promise<void> {
@@ -206,10 +222,7 @@ export class GemmeraChatView extends ItemView {
         this.appendMessage("assistant", `Capture failed: ${outcome.reason}`);
       }
     } catch (err) {
-      this.appendMessage(
-        "assistant",
-        `Capture failed: ${err instanceof Error ? err.message : "unknown error"}`,
-      );
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     }
   }
 
@@ -237,6 +250,7 @@ export class GemmeraChatView extends ItemView {
       });
     }
 
+    const userTs = Date.now();
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
 
     try {
@@ -253,15 +267,28 @@ export class GemmeraChatView extends ItemView {
       });
       this.history.push({ role: "assistant", content: reply.content });
 
+      if (this.chatHistory) {
+        const ch = this.chatHistory;
+        (async () => {
+          if (!this.currentSessionId) {
+            const session = await ch.createSession();
+            this.currentSessionId = session.id;
+          }
+          const sid = this.currentSessionId;
+          await ch.appendTurn(sid, { role: "user", content: text, timestamp: userTs });
+          await ch.appendTurn(sid, { role: "assistant", content: reply.content, timestamp: Date.now() });
+        })().catch(() => {});
+      }
+
       // Record for classifier context on the next turn (last 3 only).
       this.recentTurns = [...this.recentTurns.slice(-2), { text, intent }];
 
       const ops = parseFileOps(reply.content);
       if (ops.length > 0) await handleFileOps(this.app, ops);
     } catch (err) {
-      textEl.textContent = `Fel: ${err instanceof Error ? err.message : "okänt fel"}`;
-      assistantEl.addClass("gemmera-message--error");
+      assistantEl.remove();
       this.history.pop();
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     } finally {
       silentSaveEl?.remove();
       this.setInputDisabled(false);
@@ -396,6 +423,53 @@ export class GemmeraChatView extends ItemView {
       if (decoration.tooltip) badge.setAttribute("title", decoration.tooltip);
     }
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+  }
+
+  private appendErrorMessage(err: unknown, onRetry: () => void): void {
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const category = categorizeError(err);
+    const displayText = userMessageForCategory(category, rawMessage);
+
+    const el = this.messagesEl.createEl("div", {
+      cls: "gemmera-message gemmera-message--assistant gemmera-message--error",
+    });
+    el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+    el.createEl("p", { cls: "gemmera-message__text", text: displayText });
+    const retryBtn = el.createEl("button", { cls: "gemmera-retry-btn", text: "Retry" });
+    retryBtn.addEventListener("click", () => {
+      el.remove();
+      onRetry();
+    });
+
+    if (category === "ollama_down") {
+      new Notice("Gemmera: Ollama is not responding. Check Settings → Gemmera → Ollama.");
+    }
+
+    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+  }
+}
+
+type ErrorCategory = "ollama_down" | "timeout" | "model_missing" | "unknown";
+
+function categorizeError(err: unknown): ErrorCategory {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  if (err instanceof Error && err.name === "AbortError") return "timeout";
+  if (msg.includes("timeout")) return "timeout";
+  if (msg.includes("econnrefused") || msg.includes("failed to fetch") || msg.includes("network error")) {
+    return "ollama_down";
+  }
+  if (msg.includes("not found") || msg.includes("pull model") || msg.includes("no such model")) {
+    return "model_missing";
+  }
+  return "unknown";
+}
+
+function userMessageForCategory(category: ErrorCategory, rawMessage: string): string {
+  switch (category) {
+    case "ollama_down": return "Ollama is not responding. Make sure Ollama is running and try again.";
+    case "timeout": return "The request timed out. Please try again.";
+    case "model_missing": return "Model not found. Check your Ollama installation.";
+    default: return `Something went wrong: ${rawMessage}`;
   }
 }
 
