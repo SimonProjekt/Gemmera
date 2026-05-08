@@ -98,7 +98,8 @@ export class GemmeraChatView extends ItemView {
     const adapter = this.app.vault.adapter as FileSystemAdapter;
     const historyPath = adapter.getFullPath(".coworkmd/chats.json");
     this.chatHistory = new ChatHistoryStore(historyPath);
-    this.chatHistory.createSession().then((s) => { this.currentSessionId = s.id; }).catch(() => {});
+    // Sessions are created lazily on the first persisted turn so opening the
+    // panel without sending anything doesn't accumulate empty rows in chats.json.
   }
 
   async onClose(): Promise<void> {
@@ -262,10 +263,14 @@ export class GemmeraChatView extends ItemView {
       });
       this.history.push({ role: "assistant", content: reply.content });
 
-      if (this.currentSessionId && this.chatHistory) {
-        const sid = this.currentSessionId;
+      if (this.chatHistory) {
         const ch = this.chatHistory;
         (async () => {
+          if (!this.currentSessionId) {
+            const session = await ch.createSession();
+            this.currentSessionId = session.id;
+          }
+          const sid = this.currentSessionId;
           await ch.appendTurn(sid, { role: "user", content: text, timestamp: userTs });
           await ch.appendTurn(sid, { role: "assistant", content: reply.content, timestamp: Date.now() });
         })().catch(() => {});
