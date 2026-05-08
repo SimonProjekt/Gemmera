@@ -12,9 +12,9 @@
 import { ClassifierInput, ClassifierOutput } from "../contracts/classifier";
 import { ChatMessage, LLMService } from "../contracts/llm";
 import { PromptLoader } from "../contracts/prompts";
+import { DEFAULT_CHAT_MODEL } from "../settings";
 import { assembleClassifierPrompt } from "./classifier-prompt";
 
-const CLASSIFIER_MODEL = "gemma4:e4b";
 const CLASSIFIER_TIMEOUT_MS = 500;
 
 /** Errors the classifier call surface can throw. */
@@ -50,6 +50,13 @@ export interface ClassifierCallDeps {
   llm: LLMService;
   /** Prompt loader — tests can inject a mock. */
   promptLoader: PromptLoader;
+  /**
+   * Ollama model tag used for the classifier call. Defaults to
+   * `DEFAULT_CHAT_MODEL` when omitted so existing tests keep working.
+   * Production callers thread `settings.chatModel` through here so the
+   * classifier and chat stay in sync.
+   */
+  model?: string;
 }
 
 /**
@@ -84,7 +91,7 @@ export async function classifyWithLLM(
   try {
     const res = await deps.llm.chat({
       messages,
-      model: CLASSIFIER_MODEL,
+      model: deps.model ?? DEFAULT_CHAT_MODEL,
       format: "json",
       stream: false,
       signal: controller.signal,

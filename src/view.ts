@@ -26,7 +26,6 @@ export class GemmeraChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private history: ChatMessage[] = [];
-  private model = "gemma4:e4b";
 
   private chip = new DisambiguationChip();
   private chipEl: HTMLElement | null = null;
@@ -77,7 +76,6 @@ export class GemmeraChatView extends ItemView {
       attr: { role: "status", "aria-live": "polite" },
     });
     this.checkOllamaStatus(statusEl);
-    this.model = this.settings.chatModel;
 
     this.pill = new IndexingPill(this.services.runnerStatus);
     this.pill.mount(headerEl, async () => {
@@ -181,7 +179,7 @@ export class GemmeraChatView extends ItemView {
       try {
         route = await classifyTurn(
           { messageText: text, attachments: [], activeFile: null, recentTurns: this.recentTurns },
-          { llm: this.services.llm, promptLoader: this.services.promptLoader, eventWriter: this.services.classifierEventWriter },
+          { llm: this.services.llm, promptLoader: this.services.promptLoader, eventWriter: this.services.classifierEventWriter, model: this.settings.chatModel },
           turnId,
         );
       } catch {
@@ -391,7 +389,7 @@ export class GemmeraChatView extends ItemView {
       const messages = withContext(this.history, searchResults);
 
       const reply = await this.services.llm.chat({
-        model: this.model,
+        model: this.settings.chatModel,
         messages,
         onToken: (token) => {
           textEl.textContent += token;
