@@ -111,18 +111,10 @@ function makeSkipDecision(label: IntentLabel, skipReason: string): ClassifierDec
 }
 
 export class OllamaClassifierService implements ClassifierService {
-  private baseUrl: string;
-
   constructor(
     private readonly thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
-    baseUrl: string = DEFAULT_BASE,
-  ) {
-    this.baseUrl = baseUrl;
-  }
-
-  setBaseUrl(url: string): void {
-    this.baseUrl = url;
-  }
+    private readonly baseUrl: string = DEFAULT_BASE,
+  ) {}
 
   async classify(opts: ClassifyOptions): Promise<ClassifierDecision> {
     const start = Date.now();

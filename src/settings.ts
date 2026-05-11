@@ -24,15 +24,7 @@ export interface GemmeraSettings {
 
   /** Comma-separated list of folder prefixes to exclude from indexing. */
   excludedFolders: string;
-
-  /** "auto" uses the default Ollama URL; "manual" uses `ollamaUrl`. */
-  ollamaUrlMode: "auto" | "manual";
-
-  /** Override URL of the Ollama HTTP API (only used when `ollamaUrlMode` is "manual"). */
-  ollamaUrl: string;
 }
-
-export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 
 export const DEFAULT_SETTINGS: GemmeraSettings = {
   llmBackend: "ollama",
@@ -41,15 +33,7 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   streamingEnabled: true,
   devMode: false,
   excludedFolders: "",
-  ollamaUrlMode: "auto",
-  ollamaUrl: DEFAULT_OLLAMA_URL,
 };
-
-export function effectiveOllamaUrl(settings: GemmeraSettings): string {
-  return settings.ollamaUrlMode === "manual" && settings.ollamaUrl.trim()
-    ? settings.ollamaUrl.trim()
-    : DEFAULT_OLLAMA_URL;
-}
 
 export class GemmeraSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: GemmeraPlugin) {
@@ -110,38 +94,6 @@ export class GemmeraSettingTab extends PluginSettingTab {
       .setDesc("Fixed: BGE-M3 (1024-dim). Used for vault indexing and RAG search.")
       .addExtraButton((btn) => btn.setIcon("info").setTooltip("bge-m3"));
 
-    new Setting(containerEl)
-      .setName("Ollama path")
-      .setDesc("\"Auto\" uses the default URL (http://127.0.0.1:11434). \"Manual\" lets you point at a non-standard port or remote host.")
-      .addDropdown((dd) =>
-        dd
-          .addOption("auto", "Auto")
-          .addOption("manual", "Manual")
-          .setValue(this.plugin.settings.ollamaUrlMode)
-          .onChange(async (value) => {
-            this.plugin.settings.ollamaUrlMode = value as "auto" | "manual";
-            await this.plugin.saveData(this.plugin.settings);
-            await this.plugin.applyOllamaUrl();
-            this.display();
-          }),
-      );
-
-    if (this.plugin.settings.ollamaUrlMode === "manual") {
-      new Setting(containerEl)
-        .setName("Ollama URL")
-        .setDesc("HTTP endpoint of the Ollama server (e.g. http://localhost:11435 or http://192.168.1.5:11434). Click \"Restart Ollama\" below to verify.")
-        .addText((text) =>
-          text
-            .setPlaceholder(DEFAULT_OLLAMA_URL)
-            .setValue(this.plugin.settings.ollamaUrl)
-            .onChange(async (value) => {
-              this.plugin.settings.ollamaUrl = value;
-              await this.plugin.saveData(this.plugin.settings);
-              this.plugin.applyOllamaUrl();
-            }),
-        );
-    }
-
     // ── Chat ─────────────────────────────────────────────────────────────
     containerEl.createEl("h2", { text: "Chat" });
 
@@ -171,19 +123,5 @@ export class GemmeraSettingTab extends PluginSettingTab {
             await this.plugin.saveData(this.plugin.settings);
           }),
       );
-
-    new Setting(containerEl)
-      .setName("Restart Ollama")
-      .setDesc("Attempt to start Ollama (if not already running) and re-check reachability. Use this after changing the Ollama URL.")
-      .addButton((btn) => {
-        btn.setButtonText("Restart Ollama").onClick(async () => {
-          btn.setDisabled(true).setButtonText("Restarting…");
-          try {
-            await this.plugin.restartOllama();
-          } finally {
-            btn.setDisabled(false).setButtonText("Restart Ollama");
-          }
-        });
-      });
   }
 }

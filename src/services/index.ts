@@ -1,7 +1,6 @@
 import { FileSystemAdapter, Notice, type App } from "obsidian";
 import type {
   ClassifierService,
-  Embedder,
   IndexService,
   IngestionPipeline,
   IngestionStore,
@@ -45,7 +44,6 @@ export interface Services {
   ingestionRunner: IngestionRunner;
   reconciler: Reconciler;
   vectorStore: VectorStore;
-  embedder: Embedder;
   embeddingService: EmbeddingService;
 }
 
@@ -54,22 +52,14 @@ const VECTORS_BIN_PATH = ".coworkmd/vectors.bin";
 const VECTORS_JSON_PATH = ".coworkmd/vectors.json";
 const DEFAULT_EMBED_MODEL = "bge-m3";
 const DEFAULT_EMBED_DIM = 1024;
-const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
-
-function resolveOllamaUrl(settings: GemmeraSettings): string {
-  return settings.ollamaUrlMode === "manual" && settings.ollamaUrl.trim()
-    ? settings.ollamaUrl.trim()
-    : DEFAULT_OLLAMA_URL;
-}
 
 export async function createLLMService(
   backend: GemmeraSettings["llmBackend"],
-  baseUrl: string,
 ): Promise<LLMService> {
   if (backend === "mock") {
     return new MockLLMService();
   }
-  const ollama = new OllamaLLMService(baseUrl);
+  const ollama = new OllamaLLMService();
   if ((await ollama.isReachable()) === "missing") {
     new Notice("Gemmera: Ollama not reachable — falling back to mock LLM.");
     return new MockLLMService();
@@ -80,12 +70,11 @@ export async function createLLMService(
 export function createClassifierService(
   backend: GemmeraSettings["llmBackend"],
   llm: LLMService,
-  baseUrl: string,
 ): ClassifierService {
   if (backend === "mock" || llm instanceof MockLLMService) {
     return new MockClassifierService();
   }
-  return new OllamaClassifierService(undefined, baseUrl);
+  return new OllamaClassifierService();
 }
 
 export async function createServices(app: App, settings: GemmeraSettings): Promise<Services> {
@@ -118,11 +107,9 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
     DEFAULT_EMBED_MODEL,
     DEFAULT_EMBED_DIM,
   );
-  const ollamaUrl = resolveOllamaUrl(settings);
   const embedder = new OllamaEmbedder({
     model: DEFAULT_EMBED_MODEL,
     dim: DEFAULT_EMBED_DIM,
-    baseUrl: ollamaUrl,
   });
   const embeddingService = new EmbeddingService(
     ingestionRunner,
@@ -131,10 +118,10 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
     ingestionStore,
   );
 
-  const llm = await createLLMService(settings.llmBackend, ollamaUrl);
+  const llm = await createLLMService(settings.llmBackend);
   return {
     llm,
-    classifier: createClassifierService(settings.llmBackend, llm, ollamaUrl),
+    classifier: createClassifierService(settings.llmBackend, llm),
     vault,
     index: new VaultLinearIndexService(vault),
     jobQueue,
@@ -145,7 +132,6 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
     ingestionRunner,
     reconciler,
     vectorStore,
-    embedder,
     embeddingService,
   };
 }
