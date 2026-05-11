@@ -1,4 +1,4 @@
-import { Menu, Plugin } from "obsidian";
+import { Menu, Modal, Notice, Plugin } from "obsidian";
 import { readFileSync, existsSync } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
@@ -58,6 +58,36 @@ export default class GemmeraPlugin extends Plugin {
       id: "open-chat",
       name: "Öppna chatt",
       callback: () => this.openChatView(),
+    });
+
+    this.addCommand({
+      id: "pause-indexer",
+      name: "Pausa indexering",
+      callback: () => {
+        this.services.ingestionRunner.stop();
+        new Notice("Gemmera: Indexing paused.");
+      },
+    });
+
+    this.addCommand({
+      id: "resume-indexer",
+      name: "Återuppta indexering",
+      callback: () => {
+        this.services.ingestionRunner.start();
+        new Notice("Gemmera: Indexing resumed.");
+      },
+    });
+
+    this.addCommand({
+      id: "rebuild-index",
+      name: "Bygg om index",
+      callback: () => this.rebuildIndex(),
+    });
+
+    this.addCommand({
+      id: "reindex-active-note",
+      name: "Indexera om aktiv anteckning",
+      callback: () => this.reindexActiveNote(),
     });
 
     this.addSettingTab(new GemmeraSettingTab(this.app, this));
@@ -168,5 +198,47 @@ export default class GemmeraPlugin extends Plugin {
       clearInterval(this.batteryTimer);
       this.batteryTimer = null;
     }
+  }
+
+  private rebuildIndex(): void {
+    const modal = new Modal(this.app);
+    modal.titleEl.setText("Bygg om index");
+    modal.contentEl.createEl("p", {
+      text:
+        "Detta kommer att tömma hela indexet och skanna om hela vaulten. " +
+        "Pågående indexering kan gå långsamt. Vill du fortsätta?",
+    });
+    const btnRow = modal.contentEl.createEl("div", { cls: "gemmera-modal__buttons" });
+    btnRow.createEl("button", { text: "Avbryt", cls: "mod-cancel" }).addEventListener("click", () => modal.close());
+    btnRow
+      .createEl("button", { text: "Bygg om", cls: "mod-warning" })
+      .addEventListener("click", async () => {
+        modal.close();
+        const paths = await this.services.ingestionStore.list();
+        for (const path of paths) {
+          await this.services.ingestionStore.delete(path);
+        }
+        const { enqueuedIndex } = await this.services.reconciler.reconcile();
+        this.statusBar.setIndexingTotal(enqueuedIndex);
+        new Notice(`Gemmera: Rebuilding index — ${enqueuedIndex} files enqueued.`);
+      });
+    modal.open();
+  }
+
+  private async reindexActiveNote(): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || !file.path.endsWith(".md")) {
+      new Notice("Gemmera: No active Markdown note to reindex.");
+      return;
+    }
+    const path = file.path;
+    const shouldIndex = this.services.pathFilter.shouldIndex(path);
+    if (!shouldIndex) {
+      new Notice(`Gemmera: ${path} is excluded from indexing.`);
+      return;
+    }
+    await this.services.ingestionStore.delete(path);
+    this.services.jobQueue.enqueue({ kind: "index", path });
+    new Notice(`Gemmera: Reindexing ${path}.`);
   }
 }
