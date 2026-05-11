@@ -12,6 +12,7 @@ import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
 import { buildMessageDecoration } from "./message-decoration";
+import { showSaveUndoNotice } from "./notices";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -207,7 +208,11 @@ export class GemmeraChatView extends ItemView {
 
       if (outcome.kind === "saved") {
         const verb = outcome.mode === "append" ? "Appended to" : "Saved to";
-        new Notice(`Gemmera: ${verb} ${outcome.path}`);
+        if (outcome.mode === "create") {
+          showSaveUndoNotice(this.app, outcome.path);
+        } else {
+          new Notice(`Gemmera: ${verb} ${outcome.path}`);
+        }
         this.appendMessage("assistant", `${verb} **${outcome.path}**`);
       } else if (outcome.kind === "split_saved") {
         new Notice(`Gemmera: saved ${outcome.paths.length} notes`);
