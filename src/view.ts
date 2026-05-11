@@ -53,6 +53,12 @@ export class GemmeraChatView extends ItemView {
     return "message-square";
   }
 
+  /** Pre-fill the composer with text and focus it. Does NOT send. */
+  setComposerText(text: string): void {
+    this.inputEl.value = text;
+    this.inputEl.focus();
+  }
+
   async onOpen(): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
