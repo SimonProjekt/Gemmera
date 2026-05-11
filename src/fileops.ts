@@ -23,28 +23,35 @@ export function parseFileOps(text: string): FileOp[] {
   return ops;
 }
 
-export async function handleFileOps(app: App, ops: FileOp[]): Promise<void> {
+export async function handleFileOps(app: App, ops: FileOp[], inboxFolder = "Inbox/"): Promise<void> {
   for (const op of ops) {
+    const filename = qualifyPath(op.filename, inboxFolder);
     if (op.type === "create") {
-      new CreateFileModal(app, op.filename, op.content, async (filename, content) => {
-        const existing = app.vault.getAbstractFileByPath(filename);
+      new CreateFileModal(app, filename, op.content, async (fname, content) => {
+        const existing = app.vault.getAbstractFileByPath(fname);
         if (existing) {
-          console.warn(`Gemmera: ${filename} finns redan, hoppar över skapande`);
+          console.warn(`Gemmera: ${fname} finns redan, hoppar över skapande`);
           return;
         }
-        await app.vault.create(filename, content);
-        showSaveUndoNotice(app, filename);
+        await app.vault.create(fname, content);
+        showSaveUndoNotice(app, fname);
       }).open();
     } else if (op.type === "append") {
-      new AppendFileModal(app, op.filename, op.content, async (filename, content) => {
-        const file = app.vault.getFileByPath(filename);
+      new AppendFileModal(app, filename, op.content, async (fname, content) => {
+        const file = app.vault.getFileByPath(fname);
         if (!file) {
-          console.warn(`Gemmera: ${filename} hittades inte för append`);
+          console.warn(`Gemmera: ${fname} hittades inte för append`);
           return;
         }
         await app.vault.append(file, "\n" + content);
-        showSaveUndoNotice(app, filename);
+        showSaveUndoNotice(app, fname);
       }).open();
     }
   }
+}
+
+function qualifyPath(filename: string, inbox: string): string {
+  if (filename.includes("/") || filename.includes("\\")) return filename;
+  const base = inbox.endsWith("/") ? inbox : inbox + "/";
+  return base + filename;
 }

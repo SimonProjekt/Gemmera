@@ -80,7 +80,7 @@ export function createClassifierService(
 export async function createServices(app: App, settings: GemmeraSettings): Promise<Services> {
   const vault = new ObsidianVaultService(app);
   const jobQueue = new InMemoryJobQueue();
-  const pathFilter = new DefaultPathFilter();
+  const pathFilter = new DefaultPathFilter(createUserIgnore(settings.excludedFolders));
   const eventBridge = new VaultEventBridge(
     new ObsidianVaultEventSource(app),
     jobQueue,
@@ -133,6 +133,18 @@ export async function createServices(app: App, settings: GemmeraSettings): Promi
     reconciler,
     vectorStore,
     embeddingService,
+  };
+}
+
+function createUserIgnore(excludedFolders: string): { matches: (path: string) => boolean } {
+  if (!excludedFolders.trim()) return { matches: () => false };
+  const prefixes = excludedFolders
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (prefixes.length === 0) return { matches: () => false };
+  return {
+    matches: (path: string) => prefixes.some((p) => path.startsWith(p)),
   };
 }
 

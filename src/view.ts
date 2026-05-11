@@ -8,6 +8,7 @@ import type { GemmeraStatusBar } from "./statusbar";
 import { classifyLLMError } from "./llm-error";
 import { parseFileOps, handleFileOps } from "./fileops";
 import { showOllamaDownNotice } from "./notices";
+import type { GemmeraSettings } from "./settings";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -30,6 +31,7 @@ export class GemmeraChatView extends ItemView {
     leaf: WorkspaceLeaf,
     private readonly services: Services,
     private readonly statusBar?: GemmeraStatusBar,
+    private readonly settings?: GemmeraSettings,
   ) {
     super(leaf);
   }
@@ -46,6 +48,7 @@ export class GemmeraChatView extends ItemView {
     const statusEl = container.createEl("div", { cls: "gemmera-status" });
     this.checkOllamaStatus(statusEl);
     this.services.llm.pickDefaultModel().then((m) => { this.model = m; }).catch(() => {});
+    if (this.settings?.chatModel) this.model = this.settings.chatModel;
 
     this.messagesEl = container.createEl("div", { cls: "gemmera-messages" });
 
@@ -195,14 +198,20 @@ export class GemmeraChatView extends ItemView {
       const searchResults = await this.services.index.search(text);
       const messages = withContext(this.history, searchResults);
 
+      const streaming = this.settings?.streamingEnabled ?? true;
       const reply = await this.services.llm.chat({
         model: this.model,
         messages,
-        onToken: (token) => {
-          textEl.textContent += token;
-          this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
-        },
+        ...(streaming && {
+          onToken: (token: string) => {
+            textEl.textContent += token;
+            this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+          },
+        }),
       });
+      if (!streaming) {
+        textEl.textContent = reply.content;
+      }
       this.history.push({ role: "assistant", content: reply.content });
 
       if (searchResults.length > 0) {
@@ -210,7 +219,7 @@ export class GemmeraChatView extends ItemView {
       }
 
       const ops = parseFileOps(reply.content);
-      if (ops.length > 0) await handleFileOps(this.app, ops);
+      if (ops.length > 0) await handleFileOps(this.app, ops, this.settings?.inboxFolder);
     } catch (err) {
       const health = await this.services.llm.isReachable().catch(() => "missing" as const);
       this.statusBar?.setHealth(health);
@@ -280,7 +289,7 @@ export class GemmeraChatView extends ItemView {
     const msg = wrap.createEl("div", { cls: "gemmera-message gemmera-message--user" });
     msg.createEl("span", { cls: "gemmera-message__role", text: "Du" });
     msg.createEl("p", { cls: "gemmera-message__text", text });
-    this.appendInspectorPanel(wrap, decision, originalDecision);
+    if (this.settings?.devMode ?? true) this.appendInspectorPanel(wrap, decision, originalDecision);
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
   }
 

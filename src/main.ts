@@ -2,7 +2,7 @@ import { Menu, Plugin } from "obsidian";
 import { readFileSync, existsSync } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
-import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
+import { DEFAULT_SETTINGS, GemmeraSettings, GemmeraSettingTab } from "./settings";
 import { GemmeraStatusBar } from "./statusbar";
 import { showIngestionFailedNotice, showBatteryPauseNotice } from "./notices";
 
@@ -30,7 +30,7 @@ export default class GemmeraPlugin extends Plugin {
       .then(({ enqueuedIndex }) => this.statusBar.setIndexingTotal(enqueuedIndex))
       .catch((err) => console.error("[gemmera] reconcile failed", err));
 
-    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services, this.statusBar));
+    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services, this.statusBar, this.settings));
 
     const ribbonEl = this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();
@@ -59,6 +59,8 @@ export default class GemmeraPlugin extends Plugin {
       name: "Öppna chatt",
       callback: () => this.openChatView(),
     });
+
+    this.addSettingTab(new GemmeraSettingTab(this.app, this));
 
     this.startBatteryMonitor();
   }
