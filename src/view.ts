@@ -3,6 +3,7 @@ import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { ClassifierDecision, IntentLabel } from "./contracts/classifier";
 import { DEFAULT_THRESHOLDS } from "./contracts/classifier";
 import type { Services } from "./services";
+import type { GemmeraStatusBar } from "./statusbar";
 import { parseFileOps, handleFileOps } from "./fileops";
 
 export const VIEW_TYPE = "gemmera-chat";
@@ -22,7 +23,11 @@ export class GemmeraChatView extends ItemView {
   private recentTurns: RecentTurn[] = [];
   private model = "gemma3:latest";
 
-  constructor(leaf: WorkspaceLeaf, private readonly services: Services) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    private readonly services: Services,
+    private readonly statusBar?: GemmeraStatusBar,
+  ) {
     super(leaf);
   }
 
@@ -182,6 +187,7 @@ export class GemmeraChatView extends ItemView {
 
   private async runAskPath(text: string): Promise<void> {
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
+    this.statusBar?.setThinking(true);
     try {
       const searchResults = await this.services.index.search(text);
       const messages = withContext(this.history, searchResults);
@@ -207,6 +213,7 @@ export class GemmeraChatView extends ItemView {
       assistantEl.addClass("gemmera-message--error");
       this.history.pop();
     } finally {
+      this.statusBar?.setThinking(false);
       this.setInputDisabled(false);
       this.inputEl.focus();
     }

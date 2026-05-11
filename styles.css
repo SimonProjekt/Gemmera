@@ -231,3 +231,27 @@
   background: transparent;
   border: none;
 }
+
+/* ── Status bar ───────────────────────────────────────────────────────────── */
+
+@keyframes gemmera-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+.gemmera-bar {
+  cursor: pointer;
+}
+
+.gemmera-bar--busy {
+  color: var(--text-accent);
+  animation: gemmera-pulse 2s ease-in-out infinite;
+}
+
+.gemmera-bar--ready {
+  color: var(--text-muted);
+}
+
+.gemmera-bar--error {
+  color: var(--text-error);
+}

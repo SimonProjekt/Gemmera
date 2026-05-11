@@ -2,9 +2,11 @@ import { Plugin, WorkspaceLeaf } from "obsidian";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
+import { GemmeraStatusBar } from "./statusbar";
 
 export default class GemmeraPlugin extends Plugin {
   private services!: Services;
+  private statusBar!: GemmeraStatusBar;
   settings!: GemmeraSettings;
 
   async onload(): Promise<void> {
@@ -14,12 +16,17 @@ export default class GemmeraPlugin extends Plugin {
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();
     this.wireDebugLogs();
+
+    this.statusBar = new GemmeraStatusBar(this, this.services, () => this.openChatView());
+    this.services.llm.isReachable().then((r) => this.statusBar.setHealth(r)).catch(() => {});
+
     // Fire reconcile in the background — hash gate keeps it cheap on warm reloads.
     this.services.reconciler
       .reconcile()
+      .then(({ enqueuedIndex }) => this.statusBar.setIndexingTotal(enqueuedIndex))
       .catch((err) => console.error("[gemmera] reconcile failed", err));
 
-    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services));
+    this.registerView(VIEW_TYPE, (leaf) => new GemmeraChatView(leaf, this.services, this.statusBar));
 
     this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();
@@ -33,6 +40,7 @@ export default class GemmeraPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    this.statusBar?.destroy();
     this.services?.eventBridge.stop();
     if (this.services) {
       await this.services.ingestionRunner.stop();
