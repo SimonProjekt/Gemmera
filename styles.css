@@ -76,7 +76,7 @@
   color: var(--text-normal);
 }
 
-.gemmera-input:focus { outline: none; border-color: var(--interactive-accent); }
+.gemmera-input:focus { outline: 2px solid var(--interactive-accent); outline-offset: -1px; border-color: var(--interactive-accent); }
 
 .gemmera-send {
   align-self: flex-end;
@@ -102,13 +102,19 @@
   border-radius: 999px;
   background: var(--background-modifier-border);
   color: var(--text-muted);
-  cursor: default;
+  cursor: pointer;
   white-space: nowrap;
+  font-size: inherit;
+  border: none;
+  font-family: inherit;
 }
 
-.gemmera-citations__chip:hover {
+.gemmera-citations__chip:hover,
+.gemmera-citations__chip:focus-visible {
   background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
   color: var(--text-normal);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 0;
 }
 
 /* ── Turn wrapper ─────────────────────────────────────────────────────────── */
@@ -272,4 +278,21 @@
 
 .gemmera-bar--error {
   color: var(--text-error);
+}
+
+/* ── Focus visibility ──────────────────────────────────────────────────── */
+
+.gemmera-send:focus-visible,
+.gemmera-chip__btn:focus-visible,
+.gemmera-retry-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+/* ── Accessibility ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .gemmera-bar--busy {
+    animation: none;
+  }
 }
