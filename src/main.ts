@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Menu, Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { readFileSync, existsSync } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
@@ -105,6 +105,104 @@ export default class GemmeraPlugin extends Plugin {
       callback: () => this.openChatView(),
     });
 
+    this.addCommand({
+      id: "capture-selection",
+      name: "Gemmera: Fånga markering",
+      hotkeys: [{ modifiers: ["Ctrl", "Shift"], key: "C" }],
+      editorCallback: (editor) => {
+        const text = editor.getSelection().trim();
+        if (text) this.openChatWithText(text);
+        else new Notice("Gemmera: Ingen text markerad.");
+      },
+    });
+
+    this.addCommand({
+      id: "capture-active-note",
+      name: "Gemmera: Fånga aktiv anteckning",
+      editorCallback: (editor) => {
+        const text = editor.getValue().trim();
+        if (text) this.openChatWithText(text);
+      },
+    });
+
+    this.addCommand({
+      id: "ask-about-active-note",
+      name: "Gemmera: Fråga om aktiv anteckning",
+      editorCallback: (editor, ctx) => {
+        const noteName = ctx.file?.basename ?? "this note";
+        this.openChatWithText(`Tell me about [[${noteName}]]`);
+      },
+    });
+
+    // ── Editor context menu ──────────────────────────────────────────────
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor, ctx) => {
+        const selection = editor.getSelection().trim();
+        if (selection) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Capture selection")
+              .setIcon("sticky-note")
+              .onClick(() => this.openChatWithText(selection)),
+          );
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Ask about selection")
+              .setIcon("search")
+              .onClick(() => this.openChatWithText(`Tell me about this: ${selection}`)),
+          );
+        }
+        const noteName = ctx.file?.basename;
+        if (noteName) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Ask about note")
+              .setIcon("file-question")
+              .onClick(() => this.openChatWithText(`Tell me about [[${noteName}]]`)),
+          );
+        }
+      }),
+    );
+
+    // ── File context menu (single file) ──────────────────────────────────
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof TFile && file.path.endsWith(".md")) {
+          menu.addSeparator();
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Ask about this note")
+              .setIcon("file-question")
+              .onClick(() => this.openChatWithText(`Tell me about [[${file.basename}]]`)),
+          );
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Reindex this note")
+              .setIcon("refresh-cw")
+              .onClick(() => this.reindexNote(file)),
+          );
+        }
+      }),
+    );
+
+    // ── Files context menu (multi-file) ──────────────────────────────────
+    this.registerEvent(
+      this.app.workspace.on("files-menu", (menu, files) => {
+        const mdFiles = files.filter((f) => f instanceof TFile && f.path.endsWith(".md")) as TFile[];
+        if (mdFiles.length === 0) return;
+        menu.addSeparator();
+        menu.addItem((item) =>
+          item
+            .setTitle("Gemmera: Ask across these notes")
+            .setIcon("files")
+            .onClick(() => {
+              const links = mdFiles.map((f) => `[[${f.basename}]]`).join(", ");
+              this.openChatWithText(`Tell me about these notes together: ${links}`);
+            }),
+        );
+      }),
+    );
+
     this.startBatteryMonitor();
   }
 
@@ -200,6 +298,21 @@ export default class GemmeraPlugin extends Plugin {
   private openSettings(): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.app as any).setting.open();
+  }
+
+  private async openChatWithText(text: string): Promise<void> {
+    await this.openChatView();
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    const view = leaves[0]?.view as GemmeraChatView | undefined;
+    view?.setComposerText(text);
+  }
+
+  private async reindexNote(file: TFile): Promise<void> {
+    const path = file.path;
+    const exists = await this.services.ingestionStore.get(path);
+    if (exists) await this.services.ingestionStore.delete(path);
+    this.services.jobQueue.enqueue({ kind: "index", path });
+    new Notice(`Gemmera: Reindexing ${path}`);
   }
 
   private startBatteryMonitor(): void {
