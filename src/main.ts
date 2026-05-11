@@ -1,8 +1,9 @@
 import { Menu, Modal, Notice, Plugin } from "obsidian";
 import { readFileSync, existsSync } from "fs";
+import { spawn } from "child_process";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
-import { createServices, Services } from "./services";
-import { DEFAULT_SETTINGS, GemmeraSettings, GemmeraSettingTab } from "./settings";
+import { createServices, Services, OllamaLLMService, OllamaClassifierService, OllamaEmbedder } from "./services";
+import { DEFAULT_SETTINGS, GemmeraSettings, GemmeraSettingTab, effectiveOllamaUrl } from "./settings";
 import { GemmeraStatusBar } from "./statusbar";
 import { showIngestionFailedNotice, showBatteryPauseNotice } from "./notices";
 
@@ -163,6 +164,37 @@ export default class GemmeraPlugin extends Plugin {
   private openSettings(): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.app as any).setting.open();
+  }
+
+  async applyOllamaUrl(): Promise<void> {
+    const url = effectiveOllamaUrl(this.settings);
+    if (this.services.llm instanceof OllamaLLMService) {
+      this.services.llm.setBaseUrl(url);
+    }
+    if (this.services.classifier instanceof OllamaClassifierService) {
+      this.services.classifier.setBaseUrl(url);
+    }
+    if (this.services.embedder instanceof OllamaEmbedder) {
+      this.services.embedder.setBaseUrl(url);
+    }
+    const health = await this.services.llm.isReachable().catch(() => "missing" as const);
+    this.statusBar.setHealth(health);
+  }
+
+  async restartOllama(): Promise<void> {
+    try {
+      spawn("ollama", ["serve"], { detached: true, stdio: "ignore" }).unref();
+    } catch {
+      // ollama binary not in PATH — surface via the reachability check below
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const health = await this.services.llm.isReachable().catch(() => "missing" as const);
+    this.statusBar.setHealth(health);
+    new Notice(
+      health === "running"
+        ? "Gemmera: Ollama is responding."
+        : "Gemmera: Ollama is still not reachable.",
+    );
   }
 
   private startBatteryMonitor(): void {

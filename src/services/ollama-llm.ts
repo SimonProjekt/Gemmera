@@ -15,7 +15,15 @@ interface OllamaChunk {
 }
 
 export class OllamaLLMService implements LLMService {
-  constructor(private readonly baseUrl: string = DEFAULT_BASE) {}
+  private baseUrl: string;
+
+  constructor(baseUrl: string = DEFAULT_BASE) {
+    this.baseUrl = baseUrl;
+  }
+
+  setBaseUrl(url: string): void {
+    this.baseUrl = url;
+  }
 
   async isReachable(): Promise<LLMReachability> {
     try {

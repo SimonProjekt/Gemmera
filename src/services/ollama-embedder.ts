@@ -24,7 +24,7 @@ export interface OllamaEmbedderOptions {
 export class OllamaEmbedder implements Embedder {
   readonly model: string;
   readonly dim: number;
-  private readonly baseUrl: string;
+  private baseUrl: string;
   private readonly batchSize: number;
 
   constructor(opts: OllamaEmbedderOptions = {}) {
@@ -32,6 +32,10 @@ export class OllamaEmbedder implements Embedder {
     this.model = opts.model ?? DEFAULT_MODEL;
     this.dim = opts.dim ?? DEFAULT_DIM;
     this.batchSize = opts.batchSize ?? DEFAULT_BATCH;
+  }
+
+  setBaseUrl(url: string): void {
+    this.baseUrl = url;
   }
 
   async embed(reqs: EmbedRequest[]): Promise<EmbedResult[]> {
