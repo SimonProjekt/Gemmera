@@ -1,6 +1,7 @@
 import { App } from "obsidian";
 import { CreateFileModal } from "./CreateFileModal";
 import { AppendFileModal } from "./AppendFileModal";
+import { showSaveUndoNotice } from "./notices";
 
 const CREATE_RE = /:::create\s+(\S+\.md)\n([\s\S]*?):::/g;
 const APPEND_RE = /:::append\s+(\S+\.md)\n([\s\S]*?):::/g;
@@ -32,6 +33,7 @@ export async function handleFileOps(app: App, ops: FileOp[]): Promise<void> {
           return;
         }
         await app.vault.create(filename, content);
+        showSaveUndoNotice(app, filename);
       }).open();
     } else if (op.type === "append") {
       new AppendFileModal(app, op.filename, op.content, async (filename, content) => {
@@ -41,6 +43,7 @@ export async function handleFileOps(app: App, ops: FileOp[]): Promise<void> {
           return;
         }
         await app.vault.append(file, "\n" + content);
+        showSaveUndoNotice(app, filename);
       }).open();
     }
   }

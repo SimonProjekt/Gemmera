@@ -1,4 +1,5 @@
 import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { spawn } from "child_process";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { ClassifierDecision, IntentLabel } from "./contracts/classifier";
 import { DEFAULT_THRESHOLDS } from "./contracts/classifier";
@@ -6,6 +7,7 @@ import type { Services } from "./services";
 import type { GemmeraStatusBar } from "./statusbar";
 import { classifyLLMError } from "./llm-error";
 import { parseFileOps, handleFileOps } from "./fileops";
+import { showOllamaDownNotice } from "./notices";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -225,7 +227,10 @@ export class GemmeraChatView extends ItemView {
       });
 
       if (health === "missing") {
-        new Notice("Gemmera: Ollama is not running. Start Ollama and click Retry in the chat.");
+        showOllamaDownNotice(() => {
+          spawn("ollama", ["serve"], { detached: true, stdio: "ignore" }).unref();
+          new Notice("Gemmera: Starting Ollama...");
+        });
       }
 
       this.history.pop();
