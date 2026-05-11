@@ -1,9 +1,10 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { ClassifierDecision, IntentLabel } from "./contracts/classifier";
 import { DEFAULT_THRESHOLDS } from "./contracts/classifier";
 import type { Services } from "./services";
 import type { GemmeraStatusBar } from "./statusbar";
+import { classifyLLMError } from "./llm-error";
 import { parseFileOps, handleFileOps } from "./fileops";
 
 export const VIEW_TYPE = "gemmera-chat";
@@ -209,8 +210,24 @@ export class GemmeraChatView extends ItemView {
       const ops = parseFileOps(reply.content);
       if (ops.length > 0) await handleFileOps(this.app, ops);
     } catch (err) {
-      textEl.textContent = `Fel: ${err instanceof Error ? err.message : "okänt fel"}`;
+      const health = await this.services.llm.isReachable().catch(() => "missing" as const);
+      this.statusBar?.setHealth(health);
+
+      textEl.textContent = classifyLLMError(err, health);
       assistantEl.addClass("gemmera-message--error");
+
+      const retryBtn = assistantEl.createEl("button", { cls: "gemmera-retry-btn", text: "Retry" });
+      retryBtn.addEventListener("click", () => {
+        assistantEl.remove();
+        this.setInputDisabled(true);
+        this.history.push({ role: "user", content: text });
+        void this.runAskPath(text);
+      });
+
+      if (health === "missing") {
+        new Notice("Gemmera: Ollama is not running. Start Ollama and click Retry in the chat.");
+      }
+
       this.history.pop();
     } finally {
       this.statusBar?.setThinking(false);

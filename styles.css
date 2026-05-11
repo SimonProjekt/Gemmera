@@ -232,6 +232,24 @@
   border: none;
 }
 
+/* ── Error bubble retry button ────────────────────────────────────────────── */
+
+.gemmera-retry-btn {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-error);
+  border: 1px solid var(--text-error);
+  background: transparent;
+}
+
+.gemmera-retry-btn:hover {
+  background: var(--background-modifier-error);
+}
+
 /* ── Status bar ───────────────────────────────────────────────────────────── */
 
 @keyframes gemmera-pulse {
