@@ -132,7 +132,16 @@
   color: var(--text-normal);
 }
 
-.gemmera-input:focus { outline: none; border-color: var(--interactive-accent); }
+.gemmera-input:focus { outline: 2px solid var(--interactive-accent); outline-offset: -1px; border-color: var(--interactive-accent); }
+
+/* ── Focus visibility ──────────────────────────────────────────────────── */
+
+.gemmera-send:focus-visible,
+.gemmera-disambig-chip__btn:focus-visible,
+.gemmera-retry-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
 
 .gemmera-send {
   align-self: flex-end;
