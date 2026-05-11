@@ -1,15 +1,19 @@
-import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Menu, Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { readFileSync, existsSync } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { OllamaLifecycle, type OllamaStatus } from "./services/ollama-lifecycle";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
 import { GemmeraSettingsTab } from "./ui/settings-tab";
+import { showIngestionFailedNotice, showBatteryPauseNotice } from "./notices";
 
 export default class GemmeraPlugin extends Plugin {
   private services!: Services;
   settings!: GemmeraSettings;
   private lifecycle!: OllamaLifecycle;
   private statusBarEl!: HTMLElement;
+  private batteryTimer: ReturnType<typeof setInterval> | null = null;
+  private batteryPaused = false;
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -73,8 +77,26 @@ export default class GemmeraPlugin extends Plugin {
       (leaf) => new GemmeraChatView(leaf, this.services, this.settings),
     );
 
-    this.addRibbonIcon("message-square", "Gemmera", () => {
+    const ribbonEl = this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();
+    });
+    ribbonEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      new Menu()
+        .addItem((item) =>
+          item.setTitle("Open in sidebar").setIcon("sidebar-right").onClick(() => this.openChatView()),
+        )
+        .addItem((item) =>
+          item.setTitle("Open in tab").setIcon("file").onClick(() => this.openChatTab()),
+        )
+        .addItem((item) =>
+          item.setTitle("Open in new window").setIcon("popup-open").onClick(() => this.openChatWindow()),
+        )
+        .addSeparator()
+        .addItem((item) =>
+          item.setTitle("Settings").setIcon("settings").onClick(() => this.openSettings()),
+        )
+        .showAtMouseEvent(e);
     });
 
     this.addCommand({
@@ -82,9 +104,12 @@ export default class GemmeraPlugin extends Plugin {
       name: "Öppna chatt",
       callback: () => this.openChatView(),
     });
+
+    this.startBatteryMonitor();
   }
 
   async onunload(): Promise<void> {
+    this.stopBatteryMonitor();
     await this.lifecycle?.stop();
     this.services?.eventBridge.stop();
     this.services?.runnerStatus.stop();
@@ -102,6 +127,8 @@ export default class GemmeraPlugin extends Plugin {
     this.services.ingestionRunner.onResult((e) => {
       if (e.kind === "error") {
         console.error("[gemmera] runner error", e.job, e.error);
+        const reason = e.error instanceof Error ? e.error.message : String(e.error);
+        showIngestionFailedNotice(reason, () => this.openChatView());
         return;
       }
       if (e.kind === "decision") {
@@ -151,6 +178,62 @@ export default class GemmeraPlugin extends Plugin {
     if (!leaf) return;
     await leaf.setViewState({ type: VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  private async openChatTab(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  private async openChatWindow(): Promise<void> {
+    const leaf = this.app.workspace.getLeaf("window");
+    await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  private openSettings(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.app as any).setting.open();
+  }
+
+  private startBatteryMonitor(): void {
+    const BAT_PATH = "/sys/class/power_supply/BAT0";
+    if (!existsSync(BAT_PATH)) return;
+
+    this.batteryTimer = setInterval(async () => {
+      try {
+        const capRaw = readFileSync(`${BAT_PATH}/capacity`, "utf-8").trim();
+        const capacity = parseInt(capRaw, 10);
+        const status = readFileSync(`${BAT_PATH}/status`, "utf-8").trim();
+
+        if (status === "Discharging" && capacity < 20 && !this.batteryPaused) {
+          this.batteryPaused = true;
+          await this.services.runnerControls.pause();
+          showBatteryPauseNotice(async () => {
+            this.batteryPaused = false;
+            await this.services.runnerControls.resume();
+          });
+        } else if (status !== "Discharging" && this.batteryPaused) {
+          this.batteryPaused = false;
+          await this.services.runnerControls.resume();
+        }
+      } catch {
+        // Battery info unavailable — ignore
+      }
+    }, 60_000);
+  }
+
+  private stopBatteryMonitor(): void {
+    if (this.batteryTimer !== null) {
+      clearInterval(this.batteryTimer);
+      this.batteryTimer = null;
+    }
   }
 }
 
