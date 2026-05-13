@@ -50,6 +50,7 @@ export interface QueryOrchestratorDeps {
   turnId?: string;
   model?: string;
   signal?: AbortSignal;
+  /** Called synchronously on each state entry so the UI can update its status chip. */
   onStateChange?: TurnStatusCallback;
 }
 

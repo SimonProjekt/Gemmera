@@ -156,3 +156,73 @@
 .gemmera-send {
   align-self: flex-end;
 }
+
+.gemmera-status-chip {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  margin: 0 12px 8px;
+  border-radius: 12px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  text-align: center;
+  animation: gemmera-status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes gemmera-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.gemmera-citation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+
+.gemmera-citation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-accent);
+  font-size: 0.75rem;
+  font-family: var(--font-monospace);
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.gemmera-citation-chip:hover {
+  background: var(--background-modifier-hover);
+}
+
+.gemmera-citation-chip:focus {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.gemmera-citation-chip__icon {
+  opacity: 0.5;
+}
+
+.gemmera-citation-chip--needs-review {
+  border-color: var(--color-orange);
+  color: var(--color-orange);
+}
+
+.gemmera-citation-chip__warning {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-orange);
+  color: var(--text-on-accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+  margin-left: 4px;
+}
