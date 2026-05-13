@@ -13,6 +13,8 @@ import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
 import { buildMessageDecoration } from "./message-decoration";
 import { showSaveUndoNotice } from "./notices";
+import { labelForState } from "./services/turn-status";
+import { CitationChipRow } from "./ui/citation-chips";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -27,6 +29,7 @@ export class GemmeraChatView extends ItemView {
 
   private chip = new DisambiguationChip();
   private chipEl: HTMLElement | null = null;
+  private statusChipEl: HTMLElement | null = null;
   private recentTurns: RecentTurn[] = [];
   private pill: IndexingPill | null = null;
 
@@ -82,6 +85,9 @@ export class GemmeraChatView extends ItemView {
     const mainEl = bodyEl.createEl("div", { cls: "gemmera-main" });
 
     this.messagesEl = mainEl.createEl("div", { cls: "gemmera-messages" });
+
+    this.statusChipEl = mainEl.createEl("div", { cls: "gemmera-status-chip" });
+    this.statusChipEl.hide();
 
     this.inputAreaEl = mainEl.createEl("div", { cls: "gemmera-input-area" });
     this.inputEl = this.inputAreaEl.createEl("textarea", {
@@ -208,6 +214,13 @@ export class GemmeraChatView extends ItemView {
           inboxFolder: this.settings.inboxFolder,
           dedupThreshold: this.settings.dedupThreshold,
           alwaysPreview: this.settings.alwaysPreviewBeforeSave,
+          onStateChange: (state, label) => {
+            if (state === "DONE" || state === "CANCELLED" || state === "TOOL_FAILED") {
+              this.hideStatusChip();
+            } else {
+              this.showStatusChip(label);
+            }
+          },
         },
       );
       this.services.runnerStatus.recompute();
@@ -296,6 +309,12 @@ export class GemmeraChatView extends ItemView {
 
       const ops = parseFileOps(reply.content);
       if (ops.length > 0) await handleFileOps(this.app, ops);
+
+      // Render citation chips from wikilinks in the response.
+      const citations = extractWikilinks(reply.content);
+      if (citations.length > 0) {
+        this.renderCitationChips(assistantEl, citations);
+      }
     } catch (err) {
       assistantEl.remove();
       this.history.pop();
@@ -406,6 +425,21 @@ export class GemmeraChatView extends ItemView {
     this.chipEl = null;
   }
 
+  private showStatusChip(label: string): void {
+    if (!this.statusChipEl) return;
+    this.statusChipEl.textContent = label;
+    this.statusChipEl.show();
+  }
+
+  private hideStatusChip(): void {
+    this.statusChipEl?.hide();
+  }
+
+  private renderCitationChips(parent: HTMLElement, citations: string[], needsReview = new Set<string>()): void {
+    if (citations.length === 0) return;
+    new CitationChipRow(this.app, parent, citations, needsReview);
+  }
+
   // ── DOM helpers ──────────────────────────────────────────────────────
 
   private setInputDisabled(disabled: boolean): void {
@@ -499,4 +533,20 @@ export function withContext(
     { role: "assistant", content: "Förstått, jag har läst anteckningarna." },
     ...history,
   ];
+}
+
+/** Extract unique [[wikilink]] paths from markdown text. */
+export function extractWikilinks(text: string): string[] {
+  const re = /\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g;
+  const seen = new Set<string>();
+  const result: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const path = m[1].trim();
+    if (path && !seen.has(path)) {
+      seen.add(path);
+      result.push(path);
+    }
+  }
+  return result;
 }

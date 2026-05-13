@@ -7,6 +7,8 @@ import type {
   RetrievalPayload,
   Retriever,
 } from "../contracts";
+import type { TurnStatusCallback } from "./turn-status";
+import { labelForState } from "./turn-status";
 
 const STATES = {
   planRetrieval: "PLAN_RETRIEVAL",
@@ -48,6 +50,8 @@ export interface QueryOrchestratorDeps {
   turnId?: string;
   model?: string;
   signal?: AbortSignal;
+  /** Called synchronously on each state entry so the UI can update its status chip. */
+  onStateChange?: TurnStatusCallback;
 }
 
 interface LLMQueryResponse {
@@ -72,6 +76,7 @@ export async function runQuery(
   // from the state the classifier left on exit.
   let prevState = "CLASSIFY_INTENT";
   const enter = async (state: string, payload?: Record<string, unknown>) => {
+    deps.onStateChange?.(state, labelForState(state));
     if (!deps.eventLog) return;
     const entry: EventLogEntry = {
       turnId,
