@@ -32,6 +32,8 @@ export class GemmeraChatView extends ItemView {
 
   private chatHistory: ChatHistoryStore | null = null;
   private currentSessionId: string | null = null;
+  private escCleared = false;
+  private prefersReducedMotion = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -39,6 +41,7 @@ export class GemmeraChatView extends ItemView {
     private readonly settings: GemmeraSettings,
   ) {
     super(leaf);
+    this.prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
   getViewType(): string {
@@ -59,7 +62,10 @@ export class GemmeraChatView extends ItemView {
     container.addClass("gemmera-view");
 
     const headerEl = container.createEl("div", { cls: "gemmera-header" });
-    const statusEl = headerEl.createEl("div", { cls: "gemmera-status" });
+    const statusEl = headerEl.createEl("div", {
+      cls: "gemmera-status",
+      attr: { role: "status", "aria-live": "polite" },
+    });
     this.checkOllamaStatus(statusEl);
     this.services.llm.pickDefaultModel().then((m) => { this.model = m; }).catch(() => {});
 
@@ -75,19 +81,38 @@ export class GemmeraChatView extends ItemView {
     const bodyEl = container.createEl("div", { cls: "gemmera-body" });
     const mainEl = bodyEl.createEl("div", { cls: "gemmera-main" });
 
-    this.messagesEl = mainEl.createEl("div", { cls: "gemmera-messages" });
+    this.messagesEl = mainEl.createEl("div", {
+      cls: "gemmera-messages",
+      attr: { role: "log", "aria-label": "Chat messages" },
+    });
 
     this.inputAreaEl = mainEl.createEl("div", { cls: "gemmera-input-area" });
     this.inputEl = this.inputAreaEl.createEl("textarea", {
       cls: "gemmera-input",
-      attr: { placeholder: "Skriv ett meddelande...", rows: "3" },
+      attr: {
+        placeholder: "Skriv ett meddelande...",
+        rows: "3",
+        "aria-label": "Message input",
+      },
     });
     this.sendBtn = this.inputAreaEl.createEl("button", {
       cls: "gemmera-send",
       text: "Skicka",
+      attr: { "aria-label": "Send message" },
     });
     this.sendBtn.addEventListener("click", () => this.handleSend());
     this.inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (this.inputEl.value.trim().length > 0 && !this.escCleared) {
+          this.inputEl.value = "";
+          this.escCleared = true;
+          e.preventDefault();
+        } else {
+          this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+        }
+        return;
+      }
+      this.escCleared = false;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.handleSend();
@@ -346,7 +371,7 @@ export class GemmeraChatView extends ItemView {
         messages,
         onToken: (token) => {
           textEl.textContent += token;
-          this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+          this.scrollToBottom();
         },
       });
       this.history.push({ role: "assistant", content: reply.content });
@@ -399,14 +424,17 @@ export class GemmeraChatView extends ItemView {
     const saveBtn = actions.createEl("button", {
       cls: "gemmera-disambig-chip__btn gemmera-disambig-chip__btn--save",
       text: "Save",
+      attr: { "aria-label": "Save as note" },
     });
     const askBtn = actions.createEl("button", {
       cls: "gemmera-disambig-chip__btn gemmera-disambig-chip__btn--ask",
       text: "Ask",
+      attr: { "aria-label": "Ask question" },
     });
     const cancelBtn = actions.createEl("button", {
       cls: "gemmera-disambig-chip__btn gemmera-disambig-chip__btn--cancel",
       text: "Cancel",
+      attr: { "aria-label": "Cancel" },
     });
 
     saveBtn.addEventListener("click", () => this.handleChipAction("save"));
@@ -486,11 +514,18 @@ export class GemmeraChatView extends ItemView {
     this.sendBtn.disabled = disabled;
   }
 
+  private scrollToBottom(): void {
+    this.messagesEl.scrollTo({
+      top: this.messagesEl.scrollHeight,
+      behavior: this.prefersReducedMotion ? "auto" : "smooth",
+    });
+  }
+
   private appendStreamingMessage(): { el: HTMLElement; textEl: HTMLElement } {
     const el = this.messagesEl.createEl("div", { cls: "gemmera-message gemmera-message--assistant" });
     el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
     const textEl = el.createEl("p", { cls: "gemmera-message__text", text: "" });
-    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+    this.scrollToBottom();
     return { el, textEl };
   }
 
@@ -506,7 +541,7 @@ export class GemmeraChatView extends ItemView {
       const badge = msg.createEl("span", { cls: "gemmera-classifier-badge", text: decoration.badge });
       if (decoration.tooltip) badge.setAttribute("title", decoration.tooltip);
     }
-    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+    this.scrollToBottom();
   }
 
   private appendErrorMessage(err: unknown, onRetry: () => void): void {
@@ -519,7 +554,11 @@ export class GemmeraChatView extends ItemView {
     });
     el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
     el.createEl("p", { cls: "gemmera-message__text", text: displayText });
-    const retryBtn = el.createEl("button", { cls: "gemmera-retry-btn", text: "Retry" });
+    const retryBtn = el.createEl("button", {
+      cls: "gemmera-retry-btn",
+      text: "Retry",
+      attr: { "aria-label": "Retry last message" },
+    });
     retryBtn.addEventListener("click", () => {
       el.remove();
       onRetry();
@@ -529,7 +568,7 @@ export class GemmeraChatView extends ItemView {
       new Notice("Gemmera: Ollama is not responding. Check Settings → Gemmera → Ollama.");
     }
 
-    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+    this.scrollToBottom();
   }
 }
 
