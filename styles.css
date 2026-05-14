@@ -104,6 +104,16 @@
   color: var(--text-error);
 }
 
+.gemmera-mixed-status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 4px 12px;
+  font-style: italic;
+}
+
+.gemmera-mixed-status--ingest { border-left: 2px solid var(--color-accent); padding-left: 8px; }
+.gemmera-mixed-status--query  { border-left: 2px solid var(--text-muted); padding-left: 8px; }
+
 .gemmera-retry-btn {
   align-self: flex-start;
   margin-top: 4px;
