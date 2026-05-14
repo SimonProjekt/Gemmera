@@ -16,8 +16,8 @@
  *   --save-baseline <p> Reserved for Phase 5.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { InMemoryIngestionStore } from "../../src/contracts/mocks/in-memory-ingestion-store";
 import { MockEmbedder } from "../../src/contracts/mocks/mock-embedder";
 import { MockVaultService } from "../../src/contracts/mocks/mock-vault";
@@ -39,6 +39,8 @@ import { LinksIndexService } from "../../src/services/links-index-service";
 import { MarkdownChunker } from "../../src/services/markdown-chunker";
 import { DefaultPayloadAssembler } from "../../src/services/payload-assembler";
 import { loadFixtureVault, loadShard, SHARDS, type GoldenExample, type ShardName } from "../retrieval-golden/loader";
+import { appendMetrics, type MetricsRow } from "./metrics-store";
+import { checkRegression, type BaselineMetrics } from "./regression-gate";
 
 // ─── CLI ──────────────────────────────────────────────────────────────
 
@@ -46,8 +48,8 @@ const argv = process.argv.slice(2);
 // `--mock` is the current default; real-embedder mode lands in a later phase.
 const _useMock = argv.includes("--mock") || !argv.includes("--live");
 const shardArg = flagValue("--shard") as ShardName | undefined;
-const _compareArg = flagValue("--compare");
-const _saveBaselineArg = flagValue("--save-baseline");
+const compareArg = flagValue("--compare");
+const saveBaselineArg = flagValue("--save-baseline");
 
 function flagValue(flag: string): string | undefined {
   const eq = argv.find((a) => a.startsWith(`${flag}=`))?.split("=")[1];
@@ -319,7 +321,7 @@ function signalBreakdown(results: QuestionResult[]): Record<WinningSignal, Signa
   ) as Record<WinningSignal, SignalBreakdown>;
 }
 
-function report(results: QuestionResult[]): void {
+function report(results: QuestionResult[]): BaselineMetrics {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const outDir = join(__dirname, "..", "runs", ts);
   mkdirSync(outDir, { recursive: true });
@@ -449,6 +451,28 @@ function report(results: QuestionResult[]): void {
   writeFileSync(join(outDir, "report.md"), md.join("\n"));
   writeFileSync(join(outDir, "report.json"), JSON.stringify(json, null, 2));
 
+  // Trend-line persistence: append one row per run to eval/runs/metrics.jsonl.
+  const metricsRow: MetricsRow = {
+    timestamp: json.timestamp,
+    mode: "mock",
+    total,
+    recallAt10: meanRecall10,
+    recallAt30: meanRecall30,
+    mrr: meanMRR,
+    citationCorrectness: meanCitationCorrectness,
+    retrievalP50Ms: p50,
+    retrievalP95Ms: p95,
+    endToEndP50Ms: e2eP50,
+    endToEndP95Ms: e2eP95,
+    perShard: Object.fromEntries(
+      [...byShard.entries()].map(([s, rs]) => [
+        s,
+        { recallAt10: mean(rs.map((r) => r.recallAt10)), n: rs.length },
+      ]),
+    ),
+  };
+  appendMetrics(join(__dirname, "..", "runs", "metrics.jsonl"), metricsRow);
+
   console.log(`Results → ${outDir}/`);
   console.log(`Examples: ${total}`);
   console.log(
@@ -463,6 +487,13 @@ function report(results: QuestionResult[]): void {
       );
     }
   }
+
+  return {
+    recallAt10: meanRecall10,
+    recallAt30: meanRecall30,
+    mrr: meanMRR,
+    citationCorrectness: meanCitationCorrectness,
+  };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────
@@ -476,7 +507,27 @@ async function main(): Promise<void> {
       results.push(await runExample(shard, ex));
     }
   }
-  report(results);
+  const current = report(results);
+
+  if (saveBaselineArg) {
+    const baseline = { ...current, savedAt: new Date().toISOString() };
+    writeFileSync(resolve(saveBaselineArg), JSON.stringify(baseline, null, 2) + "\n");
+    console.log(`\nBaseline saved → ${saveBaselineArg}`);
+  }
+
+  if (compareArg) {
+    const baseline = JSON.parse(readFileSync(resolve(compareArg), "utf8")) as BaselineMetrics;
+    const result = checkRegression(current, baseline);
+    if (result.messages.length > 0) {
+      console.log("");
+      for (const m of result.messages) console.log(m);
+    }
+    if (result.regressed) {
+      console.error("\n[FAIL] Regression gate tripped — see [P0] line above.");
+      process.exit(1);
+    }
+    console.log("\n[OK] No P0 regressions vs baseline.");
+  }
 }
 
 main().catch((err) => {

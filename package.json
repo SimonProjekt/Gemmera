@@ -12,7 +12,8 @@
     "eval:classifier:mock": "tsx eval/runner/classify.ts --mock",
     "eval:classifier:ci": "tsx eval/runner/classify.ts --mock --compare eval/classifier-golden/baseline-mock.json",
     "eval:retrieval": "tsx eval/runner/retrieval.ts",
-    "eval:retrieval:mock": "tsx eval/runner/retrieval.ts --mock"
+    "eval:retrieval:mock": "tsx eval/runner/retrieval.ts --mock",
+    "eval:retrieval:ci": "tsx eval/runner/retrieval.ts --mock --compare eval/retrieval-golden/baseline.json"
   },
   "dependencies": {
     "ajv": "^8.20.0"
