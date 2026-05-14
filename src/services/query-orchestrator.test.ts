@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryEventLog } from "./event-log";
+import { RetryBudget } from "./retry-policy";
 import { runQuery, type QueryOrchestratorDeps, type QueryInput } from "./query-orchestrator";
 import type {
   ChatOptions,
@@ -247,5 +248,97 @@ describe("runQuery", () => {
     const events = await eventLog!.eventsFor("turn-1");
     const states = events.filter((e) => e.kind === "enter").map((e) => e.state);
     expect(states).toEqual(["PLAN_RETRIEVAL", "RETRIEVE", "PRESENT", "DONE"]);
+  });
+});
+
+// ── Retry policy (#51) ────────────────────────────────────────────────────────
+
+class FailThenSucceedRetriever implements Retriever {
+  private calls = 0;
+  constructor(private readonly failCount: number, private readonly hits: RetrievalHit[]) {}
+  async retrieve(): Promise<RetrievalHit[]> {
+    if (this.calls++ < this.failCount) throw new Error("embedding failed");
+    return this.hits;
+  }
+}
+
+describe("runQuery — retry policy (#51)", () => {
+  it("invalid JSON → 1 budget retry → succeeds", async () => {
+    const { deps } = setup({
+      llmReplies: ["not json", validReply("ok", ["Notes/a.md"])],
+    });
+    const budget = new RetryBudget(3);
+    deps.retryBudget = budget;
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("answered");
+    expect(budget.count).toBe(1);
+  });
+
+  it("invalid JSON on both attempts → failed", async () => {
+    const { deps } = setup({ llmReplies: ["not json"] });
+    deps.retryBudget = new RetryBudget(3);
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") return;
+    expect(outcome.reason).toBe("generate:invalid_json");
+  });
+
+  it("hallucinated citations → budget retry → succeeds with valid citations", async () => {
+    const { deps } = setup({
+      llmReplies: [
+        validReply("First.", ["Notes/ghost.md"]),          // invalid citation
+        validReply("Fixed.", ["Notes/a.md"]),              // valid
+      ],
+    });
+    deps.retryBudget = new RetryBudget(3);
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("answered");
+    if (outcome.kind !== "answered") return;
+    expect(outcome.citations).toEqual(["Notes/a.md"]);
+  });
+
+  it("hallucinated citations + budget exhausted → validation_failed without retry", async () => {
+    const { deps } = setup({
+      llmReplies: [validReply("First.", ["Notes/ghost.md"])],
+    });
+    deps.retryBudget = new RetryBudget(0);
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("validation_failed");
+  });
+
+  it("embedding fail → 1 infra retry after 250 ms → succeeds (no budget consumed)", async () => {
+    const { deps } = setup({ llmReplies: [validReply("ok", ["Notes/a.md"])] });
+    const budget = new RetryBudget(3);
+    deps.retryBudget = budget;
+    deps.retriever = new FailThenSucceedRetriever(1, [makeHit("Notes/a.md", "text")]);
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("answered");
+    expect(budget.count).toBe(0); // infra retries don't consume budget
+  });
+
+  it("retriever fails twice → TOOL_FAILED", async () => {
+    const { deps } = setup({ llmReplies: [] });
+    deps.retriever = new FailThenSucceedRetriever(99, []);
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") return;
+    expect(outcome.reason).toMatch(/retrieve:/);
+  });
+
+  it("reranker fail → 0 retries, falls back to raw hits, still answers", async () => {
+    const failingReranker: Retriever = {
+      async retrieve(): Promise<RetrievalHit[]> { throw new Error("reranker down"); },
+    };
+    const { deps } = setup({ llmReplies: [validReply("ok", ["Notes/a.md"])] });
+    deps.reranker = failingReranker;
+
+    const outcome = await runQuery({ query: "q" }, deps);
+    expect(outcome.kind).toBe("answered");
   });
 });

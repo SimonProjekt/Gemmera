@@ -16,6 +16,7 @@ import type {
 import { parseContent } from "./ingest-parser";
 import { decideStrategy } from "./ingest-strategy";
 import { IngestWriter } from "./ingest-writer";
+import { RetryBudget } from "./retry-policy";
 import type { TurnStatusCallback } from "./turn-status";
 import { labelForState } from "./turn-status";
 import { unique } from "./util";
@@ -80,6 +81,8 @@ export interface IngestOrchestratorDeps {
   version?: string;
   runId?: () => string;
   signal?: AbortSignal;
+  /** Shared retry budget for model-output retries across this turn. */
+  retryBudget?: RetryBudget;
 }
 
 /**
@@ -121,13 +124,14 @@ export async function runIngest(
 
   // ── PARSE_CONTENT ────────────────────────────────────────────────────
   await enter(STATES.parse);
+  const budget = deps.retryBudget ?? new RetryBudget();
   const parse = await parseContent(input.text, input.instruction, {
     llm: deps.llm,
     promptLoader: deps.promptLoader,
     runId: deps.runId,
     model: deps.model,
     version: deps.version,
-  }, deps.signal);
+  }, deps.signal, budget);
   if (!parse.ok) {
     if (parse.reason === "empty") {
       await enter(STATES.cancelled, { reason: "empty_input" });
