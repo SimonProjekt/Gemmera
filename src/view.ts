@@ -237,7 +237,7 @@ export class GemmeraChatView extends ItemView {
 
     // ── Mixed (#47) ───────────────────────────────────────────────────
     if (intent === "mixed") {
-      const signal = this.setStreaming(true)!;
+      const signal = this.setStreaming(true);
       try {
         await this.runMixed(text, turnId, signal);
       } finally {
@@ -252,7 +252,7 @@ export class GemmeraChatView extends ItemView {
 
     // ── Ask (#14) — vault-grounded query through the RAG tool loop ────
     if (intent === "ask") {
-      const signal = this.setStreaming(true)!;
+      const signal = this.setStreaming(true);
       try {
         await this.runAsk(text, turnId, route ?? null, signal);
       } finally {
@@ -266,7 +266,7 @@ export class GemmeraChatView extends ItemView {
     }
 
     // ── Chat (meta / fallback, no retrieval) ──────────────────────────
-    const signal = this.setStreaming(true)!;
+    const signal = this.setStreaming(true);
     try {
       await this.runChat(text, intent, turnId, route ?? null, signal);
     } finally {
@@ -577,11 +577,12 @@ export class GemmeraChatView extends ItemView {
     } catch (err) {
       if (isAbortError(err)) {
         // Preserve any partial tokens already rendered into textEl and mark
-        // the turn as cancelled. Pop the assistant entry from history because
-        // we never received a complete reply; the user text stays so the next
-        // turn keeps the right context.
+        // the turn as cancelled. No assistant entry was pushed to history
+        // yet — that only happens after `services.llm.chat` resolves — so
+        // there's nothing to pop here. The user message stays so the next
+        // turn keeps the right context, which is what we want for an
+        // edit-and-retry that references the cancelled question.
         this.markMessageCancelled(assistantEl, textEl);
-        this.history.pop();
       } else {
         assistantEl.remove();
         this.history.pop();
@@ -761,10 +762,23 @@ export class GemmeraChatView extends ItemView {
    * Toggle the composer between idle (Send) and streaming (Stop). The Send
    * button stays enabled while streaming so the user can interrupt; only the
    * textarea is disabled so they can't queue a second turn.
+   *
+   * Overloaded so callers never need to non-null-assert the return value:
+   * `setStreaming(true)` is statically typed to return `AbortSignal`,
+   * `setStreaming(false)` returns `void`.
+   *
+   * KNOWN GAP: Stop is unreachable while the classifier-orchestrator is
+   * deciding the intent (handleSend awaits classifyTurn before the
+   * setStreaming(true) call below). Classify is a single small LLM call so
+   * this is acceptable in practice; threading the signal into
+   * classifier-orchestrator is a follow-up (touches its public API and
+   * tests across the classifier stack).
    */
-  private setStreaming(active: boolean, signal?: AbortSignal): AbortSignal | undefined {
+  private setStreaming(active: true): AbortSignal;
+  private setStreaming(active: false): void;
+  private setStreaming(active: boolean): AbortSignal | void {
     if (active) {
-      const s = signal ?? this.streaming.begin();
+      const s = this.streaming.begin();
       this.inputEl.disabled = true;
       this.sendBtn.disabled = false;
       this.sendBtn.setText(this.stopLabel);
@@ -778,7 +792,6 @@ export class GemmeraChatView extends ItemView {
     this.sendBtn.setText(this.sendLabel);
     this.sendBtn.setAttribute("aria-label", "Send message");
     this.sendBtn.removeClass("gemmera-send--stop");
-    return undefined;
   }
 
   /**
