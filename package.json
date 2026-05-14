@@ -1,6 +1,6 @@
 {
   "name": "gemmera",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Local knowledge base Obsidian plugin powered by Gemma 4 via Ollama",
   "main": "main.js",
   "scripts": {
