@@ -82,6 +82,12 @@ export class ChatHistoryStore {
    * Rename a session. Returns the updated session, or `null` if the session
    * doesn't exist or the title is empty/whitespace. Long titles are clamped
    * to 200 chars so the drawer doesn't overflow. #43.
+   *
+   * NOTE: rename intentionally bumps `updatedAt`, which moves the chat to
+   * the top of `listSessions()`. The renamed chat is "recently touched" —
+   * if a user is organizing old chats, expecting them to stay in place,
+   * surface that this re-orders. The deliberate-ordering test pins this
+   * behavior; change here also requires updating that test.
    */
   async renameSession(id: string, title: string): Promise<ChatSession | null> {
     const trimmed = title.trim();

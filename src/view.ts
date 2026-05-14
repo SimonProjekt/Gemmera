@@ -156,6 +156,13 @@ export class GemmeraChatView extends ItemView {
     // chatHistory + chatState are shared with the plugin instance (#43), so
     // detaching the view to a pop-out window and reopening preserves the
     // live conversation. Replay any buffered turns into the new DOM.
+    //
+    // KNOWN LIMITATION (#152 review): replay is text-only. Route chips,
+    // classifier-decision badges, silent-save indicators, citation chips,
+    // and other per-turn DOM decorations are dropped on pop-out. Restoring
+    // them needs decorations stored alongside each turn in ChatSessionState
+    // — out of scope here. Conversation continuity is preserved; visual
+    // polish is not.
     for (const turn of this.history) {
       this.appendMessage(turn.role === "user" ? "user" : "assistant", turn.content);
     }
@@ -671,17 +678,30 @@ export class GemmeraChatView extends ItemView {
       titleEl.setText(original);
     };
 
-    titleEl.addEventListener("blur", () => { void commit(); }, { once: true });
-    titleEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        titleEl.blur();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        cancel();
-        titleEl.blur();
-      }
-    });
+    // Tie both listeners to one AbortController so commit/cancel guarantees
+    // the keydown handler is removed too. Without this, dblclick → Escape →
+    // dblclick on the same node would stack a second keydown handler since
+    // the node isn't rebuilt until renderHistoryDrawer runs. #152 review.
+    const ac = new AbortController();
+    titleEl.addEventListener(
+      "blur",
+      () => { ac.abort(); void commit(); },
+      { once: true },
+    );
+    titleEl.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          titleEl.blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cancel();
+          titleEl.blur();
+        }
+      },
+      { signal: ac.signal },
+    );
   }
 
   private startNewSession(): void {
