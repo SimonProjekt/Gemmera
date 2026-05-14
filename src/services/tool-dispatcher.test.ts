@@ -114,6 +114,37 @@ describe("dispatchToolCall — collision handling", () => {
   });
 });
 
+describe("dispatchToolCall — read tools", () => {
+  it("marks get_note summaries when content is truncated", async () => {
+    const vault = new MockVaultService({ "Long.md": "x".repeat(2001) });
+    const result = await dispatchToolCall(
+      { id: "6", name: "get_note", arguments: { path: "Long.md" } },
+      makeDeps({ vault }),
+    );
+
+    expect(result.kind).toBe("done");
+    if (result.kind !== "done") return;
+    expect(result.summary).toContain("Read **Long.md**");
+    expect(result.summary).toContain("[...truncated at 2000 chars; full note is 2001 chars]");
+    expect(result.citations).toEqual(["Long.md"]);
+  });
+
+  it("uses tokenized basename and note content for find_related_notes", async () => {
+    const vault = new MockVaultService({ "notes/vandringsnoter_sundsvall_harnosand.md": "Bridge route and ferry notes" });
+    const search = vi.fn().mockResolvedValue([
+      { path: "notes/related.md", basename: "related", snippet: "route", score: 1 },
+    ]);
+    const result = await dispatchToolCall(
+      { id: "7", name: "find_related_notes", arguments: { path: "notes/vandringsnoter_sundsvall_harnosand.md" } },
+      makeDeps({ vault, index: { search } }),
+    );
+
+    expect(result.kind).toBe("done");
+    expect(search).toHaveBeenCalledWith(expect.stringContaining("vandringsnoter sundsvall harnosand"), { topK: 5 });
+    expect(search).toHaveBeenCalledWith(expect.stringContaining("Bridge route"), { topK: 5 });
+  });
+});
+
 describe("buildFrontmatter", () => {
   it("wraps title in double-quotes (valid YAML)", () => {
     const fm = buildFrontmatter("Hello world", []);
