@@ -35,14 +35,13 @@ Copy `main.js`, `manifest.json`, and `styles.css` to `<your-vault>/.obsidian/plu
 ```bash
 ollama pull gemma3           # chat model (~5 GB)
 ollama pull bge-m3           # embedding model (~1.2 GB)
-ollama pull bge-reranker-v2-m3   # reranker (~600 MB)
 ```
 
 ### First run
 
 On first activation Gemmera indexes your vault in the background — chunking and embedding every note. The chat panel is usable immediately; retrieval improves as indexing completes (~10–30 min for a 5 000-note vault on CPU).
 
-Open the chat panel via the ribbon icon or **Ctrl+P → Gemmera: Öppna chatt**.
+Open the chat panel via the ribbon icon or from the Obsidian command palette.
 
 ## What it does
 
@@ -73,24 +72,24 @@ npm run dev       # watch build for Obsidian hot-reload
 npm run build     # production build → main.js
 ```
 
-Tests cover the full tool-loop state machines, retry policy, classifier, chunker, embedding pipeline, and UI components — 641 tests across 58 files.
+Tests cover the full tool-loop state machines, retry policy, classifier, chunker, embedding pipeline, and UI components. As of the v0.1.1 hardening audit, the suite contains 711 tests across 63 files.
 
-## Tidsplan — 4 veckor
+## Project Timeline — 4 Weeks
 
-### Vecka 1 ✅
-- Plugin-skelett, Ollama-integration, chat-panel med konversationshistorik, Jonas Berg persona
+### Week 1 ✅
+- Plugin skeleton, Ollama integration, chat panel with conversation history, Jonas Berg demo persona
 
-### Vecka 2 ✅
-- Verktyg för filskapande och uppdatering, preview-dialog, vault-sökning med citat
+### Week 2 ✅
+- File creation and update tools, preview dialog, vault search with citations
 
-### Vecka 3 ✅
-- Inkrementell indexering: markdown-chunker, hash-grindad pipeline, BGE-M3 embedder, BM25, reranker, rekonciliering
+### Week 3 ✅
+- Incremental indexing: Markdown chunker, hash-gated pipeline, BGE-M3 embedder, BM25, reconciliation
 
-### Vecka 4 ✅
+### Week 4 ✅
 - Retry policy, Ollama lifecycle, responsive UI, citation chips, v0.1 release
 
 ## Team
 
-Par-projekt. Person A: Ollama-integration, LLM-prompting, verktygsanrop, retrieval-pipeline. Person B: Obsidian-plugin-UI, chat-panel, preview-modal, komponenttestning. Båda deltar i planering varje vecka; review-rollen roterar.
+Course team project. Person A focuses on Ollama integration, LLM prompting, tool calls, and the retrieval pipeline. Person B focuses on Obsidian plugin UI, the chat panel, preview modals, and component testing. The team plans together every week and rotates the reviewer role.
 
-Se [CONTRIBUTING.md](CONTRIBUTING.md) för hur man bidrar.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
