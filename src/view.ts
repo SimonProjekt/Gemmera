@@ -373,6 +373,10 @@ export class GemmeraChatView extends ItemView {
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     } finally {
       this.contextPanel?.setIdle(this.recentCaptures);
+      // Guard against a stuck auto-confirm if the orchestrator threw between
+      // the `edit` decision and its follow-up preview call — without this, the
+      // next save turn would silently skip the form.
+      this.inlinePreviewAutoConfirm = false;
     }
   }
 
@@ -513,6 +517,7 @@ export class GemmeraChatView extends ItemView {
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     } finally {
       this.contextPanel?.setIdle(this.recentCaptures);
+      this.inlinePreviewAutoConfirm = false;
     }
   }
 

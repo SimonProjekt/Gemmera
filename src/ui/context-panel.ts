@@ -97,6 +97,11 @@ export class ContextPanel {
   isWideLayoutActive(): boolean {
     // offsetParent is null when an ancestor is `display: none`, which is how
     // the narrow-mode rule hides .gemmera-context-panel.
+    //
+    // Intentionally untested: JSDOM does not compute `offsetParent` from real
+    // layout (it returns the parent element regardless of `display`), so a
+    // unit test here would assert JSDOM's stub behavior, not the production
+    // contract with the CSS container query. Verified manually instead.
     return this.root.offsetParent !== null;
   }
 
@@ -105,6 +110,15 @@ export class ContextPanel {
 
   private render(): void {
     this.root.empty();
+    // Clear all state classes centrally so each render fn only adds its own.
+    // Without this, a transition (e.g. inline-preview → idle) would leak the
+    // previous state's modifier class and its CSS would keep applying.
+    this.root.removeClass(
+      "gemmera-context-content--idle",
+      "gemmera-context-content--query",
+      "gemmera-context-content--ingestion",
+      "gemmera-context-content--inline-preview",
+    );
     switch (this.state.kind) {
       case "idle":
         renderIdle(this.root, this.state.recentCaptures);
@@ -129,7 +143,6 @@ export class ContextPanel {
 
 function renderIdle(root: HTMLElement, captures: RecentCapture[]): void {
   root.addClass("gemmera-context-content--idle");
-  root.removeClass("gemmera-context-content--query", "gemmera-context-content--ingestion");
 
   root.createEl("h4", { cls: "gemmera-context__title", text: "Recent captures" });
 
@@ -156,7 +169,6 @@ function renderQuery(
   status: string | undefined,
 ): void {
   root.addClass("gemmera-context-content--query");
-  root.removeClass("gemmera-context-content--idle", "gemmera-context-content--ingestion");
 
   root.createEl("h4", { cls: "gemmera-context__title", text: "Retrieved sources" });
   root.createEl("p", { cls: "gemmera-context__query", text: `“${query}”` });
@@ -196,7 +208,6 @@ function renderQuery(
 
 function renderIngestion(root: HTMLElement, status: string): void {
   root.addClass("gemmera-context-content--ingestion");
-  root.removeClass("gemmera-context-content--idle", "gemmera-context-content--query");
 
   root.createEl("h4", { cls: "gemmera-context__title", text: "Ingesting" });
   root.createEl("p", { cls: "gemmera-context__status", text: status });
@@ -208,11 +219,6 @@ function renderInlinePreview(
   fallbackFolder: string,
   onDecide: (d: PreviewDecision) => void,
 ): void {
-  root.removeClass(
-    "gemmera-context-content--idle",
-    "gemmera-context-content--query",
-    "gemmera-context-content--ingestion",
-  );
   root.addClass("gemmera-context-content--inline-preview");
 
   // Append and dedup-ask are simple confirm/cancel dialogs without an
@@ -240,8 +246,11 @@ function renderInlinePreview(
 
   const form = root.createEl("div", { cls: "gemmera-note-preview gemmera-inline-preview" });
 
+  // Folder is intentionally omitted: the orchestrator writes to
+  // `deps.inboxFolder` regardless of any per-preview folder value, so an
+  // editable Folder field would silently discard the user's input. The
+  // inbox folder is configurable in the Settings tab.
   const titleInput = makeInput(form, "Title", spec.title);
-  const folderInput = makeInput(form, "Folder", fallbackFolder);
   const typeSelect = makeSelect(form, "Type", NOTE_TYPES, spec.type);
   const statusSelect = makeSelect(form, "Status", NOTE_STATUSES, spec.status);
   const tagsInput = makeInput(form, "Tags (comma-separated)", spec.tags.join(", "));
@@ -260,7 +269,7 @@ function renderInlinePreview(
 
   const collectRaw = () => ({
     title: titleInput.value,
-    folder: folderInput.value,
+    folder: fallbackFolder,
     type: typeSelect.value,
     status: statusSelect.value,
     tags: tagsInput.value,
@@ -288,13 +297,21 @@ function renderInlinePreview(
       errorEl.style.display = "none";
     }
   };
-  for (const el of [titleInput, folderInput, tagsInput, aliasesInput, summaryInput]) {
+  for (const el of [titleInput, tagsInput, aliasesInput, summaryInput]) {
     el.addEventListener("input", updateSaveEnabled);
   }
   for (const sel of [typeSelect, statusSelect]) {
     sel.addEventListener("change", updateSaveEnabled);
   }
   updateSaveEnabled();
+
+  // Enter in any single-line text input triggers Save — matches the modal
+  // form's keyboard UX so the two surfaces feel the same.
+  for (const input of [titleInput, tagsInput, aliasesInput]) {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); doSave(); }
+    });
+  }
 
   saveBtn.addEventListener("click", doSave);
   cancelBtn.addEventListener("click", () => decide({ action: "cancel" }));

@@ -213,9 +213,9 @@ export class GemmeraSettingsTab extends PluginSettingTab {
       .setDesc(
         "Render the pre-save preview inside the right-side context panel instead of opening a modal. Only takes effect when the chat pane is wide enough to show the panel; narrow layouts always use the modal.",
       )
-      .addToggle((toggle: { setValue: (v: boolean) => unknown; onChange: (cb: (v: boolean) => void) => unknown }) => {
+      .addToggle((toggle) => {
         toggle.setValue(this.settings.inlinePreviewInWidePanel);
-        toggle.onChange(async (value: boolean) => {
+        toggle.onChange(async (value) => {
           this.settings.inlinePreviewInWidePanel = value;
           await this.saveSettings();
         });
