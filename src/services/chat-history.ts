@@ -66,6 +66,23 @@ export class ChatHistoryStore {
     return [...data.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  /**
+   * Rename a session. Returns the updated session, or `null` if the session
+   * doesn't exist or the title is empty/whitespace. Long titles are clamped
+   * to 200 chars so the drawer doesn't overflow. #43.
+   */
+  async renameSession(id: string, title: string): Promise<ChatSession | null> {
+    const trimmed = title.trim();
+    if (!trimmed) return null;
+    const data = await this.load();
+    const session = data.sessions.find((s) => s.id === id);
+    if (!session) return null;
+    session.title = trimmed.slice(0, 200);
+    session.updatedAt = Date.now();
+    await this.flush(data);
+    return session;
+  }
+
   async pruneIfNeeded(): Promise<void> {
     if (this.retention.maxDays === undefined && this.retention.maxSessions === undefined) return;
     const data = await this.load();

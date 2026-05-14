@@ -1,5 +1,6 @@
-import { FileSystemAdapter, ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import { ChatHistoryStore } from "./services/chat-history";
+import { ChatSessionState } from "./services/chat-session-state";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { IntentLabel, RecentTurn, RouteDecision } from "./contracts/classifier";
 import type { Services } from "./services";
@@ -32,16 +33,12 @@ export class GemmeraChatView extends ItemView {
   private contextPanelEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
-  private history: ChatMessage[] = [];
 
   private chip = new DisambiguationChip();
   private chipEl: HTMLElement | null = null;
   private statusChipEl: HTMLElement | null = null;
-  private recentTurns: RecentTurn[] = [];
   private pill: IndexingPill | null = null;
 
-  private chatHistory: ChatHistoryStore | null = null;
-  private currentSessionId: string | null = null;
   private escCleared = false;
   private prefersReducedMotion = false;
   private lastTurnId: string | undefined;
@@ -51,10 +48,24 @@ export class GemmeraChatView extends ItemView {
     leaf: WorkspaceLeaf,
     private readonly services: Services,
     private readonly settings: GemmeraSettings,
+    // Shared with the plugin instance so pop-out / re-open survives the live
+    // chat (#43). Falls back to view-local construction in tests.
+    private readonly chatHistory: ChatHistoryStore,
+    private readonly chatState: ChatSessionState,
   ) {
     super(leaf);
     this.prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
+
+  // ── Compatibility shims for fields previously local to the view. Reads/writes
+  // are now redirected at the plugin-level ChatSessionState so all view
+  // instances (sidebar / tab / pop-out) see the same buffer. #43.
+  private get history(): ChatMessage[] { return this.chatState.history; }
+  private set history(v: ChatMessage[]) { this.chatState.history = v; }
+  private get recentTurns(): RecentTurn[] { return this.chatState.recentTurns; }
+  private set recentTurns(v: RecentTurn[]) { this.chatState.recentTurns = v; }
+  private get currentSessionId(): string | null { return this.chatState.currentSessionId; }
+  private set currentSessionId(v: string | null) { this.chatState.currentSessionId = v; }
 
   getViewType(): string {
     return VIEW_TYPE;
@@ -142,12 +153,12 @@ export class GemmeraChatView extends ItemView {
     this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
     this.historyDrawerEl = this.contextPanelEl.createEl("div", { cls: "gemmera-history" });
 
-    const adapter = this.app.vault.adapter as FileSystemAdapter;
-    const historyPath = adapter.getFullPath(".coworkmd/chats.json");
-    this.chatHistory = new ChatHistoryStore(historyPath, this.retentionPolicy());
-    // Sessions are created lazily on the first persisted turn so opening the
-    // panel without sending anything doesn't accumulate empty rows in chats.json.
-
+    // chatHistory + chatState are shared with the plugin instance (#43), so
+    // detaching the view to a pop-out window and reopening preserves the
+    // live conversation. Replay any buffered turns into the new DOM.
+    for (const turn of this.history) {
+      this.appendMessage(turn.role === "user" ? "user" : "assistant", turn.content);
+    }
     // Prune stale sessions on open, then render the drawer.
     this.chatHistory.pruneIfNeeded().catch((err) => console.error("[gemmera] pruneIfNeeded:", err)).finally(() => {
       this.renderHistoryDrawer().catch((err) => console.error("[gemmera] renderHistoryDrawer:", err));
@@ -526,7 +537,7 @@ export class GemmeraChatView extends ItemView {
         }
       }
 
-      if (this.chatHistory) {
+      {
         const ch = this.chatHistory;
         (async () => {
           if (!this.currentSessionId) {
@@ -562,15 +573,11 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
-  // ── Chat history drawer (#70) ─────────────────────────────────────────
-
-  private retentionPolicy(): { maxDays?: number; maxSessions?: number } {
-    return {};
-  }
+  // ── Chat history drawer (#70 + #43) ──────────────────────────────────
 
   private async renderHistoryDrawer(): Promise<void> {
     const el = this.historyDrawerEl;
-    if (!el || !this.chatHistory) return;
+    if (!el) return;
 
     el.empty();
 
@@ -597,7 +604,11 @@ export class GemmeraChatView extends ItemView {
         cls: `gemmera-history__item${isActive ? " gemmera-history__item--active" : ""}`,
         attr: { tabindex: "0", role: "button", "aria-pressed": String(isActive) },
       });
-      item.createEl("span", { cls: "gemmera-history__item-title", text: session.title });
+      const titleEl = item.createEl("span", {
+        cls: "gemmera-history__item-title",
+        text: session.title,
+        attr: { title: "Double-click to rename" },
+      });
       const meta = formatSessionMeta(session.updatedAt, session.turns.filter((t) => t.role === "user").length);
       item.createEl("span", { cls: "gemmera-history__item-meta", text: meta });
 
@@ -608,12 +619,73 @@ export class GemmeraChatView extends ItemView {
           this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err));
         }
       });
+
+      // Inline rename: double-click title → contenteditable, blur/Enter saves,
+      // Escape reverts. Stops propagation so the item-level click handler
+      // doesn't swap the session out from under the edit. #43.
+      titleEl.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        this.beginInlineRename(titleEl, session.id, session.title);
+      });
     }
   }
 
+  private beginInlineRename(titleEl: HTMLElement, sessionId: string, original: string): void {
+    titleEl.setAttribute("contenteditable", "true");
+    titleEl.addClass("gemmera-history__item-title--editing");
+    titleEl.focus();
+    // Select all of the existing title for quick replacement.
+    const range = document.createRange();
+    range.selectNodeContents(titleEl);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+
+    const commit = async () => {
+      titleEl.removeAttribute("contenteditable");
+      titleEl.removeClass("gemmera-history__item-title--editing");
+      const next = (titleEl.textContent ?? "").trim();
+      if (next.length === 0 || next === original) {
+        titleEl.setText(original);
+        return;
+      }
+      try {
+        const updated = await this.chatHistory.renameSession(sessionId, next);
+        if (updated) {
+          titleEl.setText(updated.title);
+          // Re-render so the meta line picks up the bumped updatedAt and the
+          // renamed chat surfaces at the top.
+          await this.renderHistoryDrawer();
+        } else {
+          titleEl.setText(original);
+        }
+      } catch (err) {
+        console.error("[gemmera] renameSession:", err);
+        titleEl.setText(original);
+      }
+    };
+
+    const cancel = () => {
+      titleEl.removeAttribute("contenteditable");
+      titleEl.removeClass("gemmera-history__item-title--editing");
+      titleEl.setText(original);
+    };
+
+    titleEl.addEventListener("blur", () => { void commit(); }, { once: true });
+    titleEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        titleEl.blur();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+        titleEl.blur();
+      }
+    });
+  }
+
   private startNewSession(): void {
-    this.history = [];
-    this.currentSessionId = null;
+    this.chatState.reset();
     this.messagesEl.empty();
     this.renderHistoryDrawer().catch(() => {});
   }

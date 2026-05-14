@@ -127,4 +127,52 @@ describe("ChatHistoryStore", () => {
     const loaded = await store.loadSession(session.id);
     expect(loaded).not.toBeNull();
   });
+
+  // ── renameSession (#43) ────────────────────────────────────────────────
+
+  it("renameSession updates the title and persists it", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const session = await store.createSession();
+    const updated = await store.renameSession(session.id, "Sundsvall trip");
+    expect(updated?.title).toBe("Sundsvall trip");
+    const reloaded = await store.loadSession(session.id);
+    expect(reloaded?.title).toBe("Sundsvall trip");
+  });
+
+  it("renameSession trims whitespace and clamps to 200 chars", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const session = await store.createSession();
+    const long = "x".repeat(300);
+    const updated = await store.renameSession(session.id, `   ${long}   `);
+    expect(updated?.title).toHaveLength(200);
+  });
+
+  it("renameSession rejects an empty / whitespace title", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const session = await store.createSession();
+    expect(await store.renameSession(session.id, "")).toBeNull();
+    expect(await store.renameSession(session.id, "   ")).toBeNull();
+    const reloaded = await store.loadSession(session.id);
+    expect(reloaded?.title).toBe("New chat");
+  });
+
+  it("renameSession returns null for unknown id", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const result = await store.renameSession("does-not-exist", "Anything");
+    expect(result).toBeNull();
+  });
+
+  it("renameSession bumps updatedAt so the renamed chat surfaces as recent", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const older = await store.createSession();
+    await new Promise((r) => setTimeout(r, 5));
+    const newer = await store.createSession();
+    let list = await store.listSessions();
+    expect(list[0].id).toBe(newer.id);
+
+    await new Promise((r) => setTimeout(r, 5));
+    await store.renameSession(older.id, "Renamed");
+    list = await store.listSessions();
+    expect(list[0].id).toBe(older.id);
+  });
 });

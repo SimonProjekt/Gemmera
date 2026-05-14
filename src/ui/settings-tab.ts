@@ -208,6 +208,37 @@ export class GemmeraSettingsTab extends PluginSettingTab {
         });
       });
 
+    // ── Chat retention (#43) ───────────────────────────────────────────
+    new Setting(containerEl)
+      .setName("Chat retention — max days")
+      .setDesc(
+        "Drop chats older than this many days. 0 = unlimited (default). Takes effect on the next chat open.",
+      )
+      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+        text.setPlaceholder?.("0");
+        text.setValue(String(this.settings.chatRetentionMaxDays));
+        text.onChange(async (value: string) => {
+          const n = parseInt(value, 10);
+          this.settings.chatRetentionMaxDays = Number.isFinite(n) && n >= 0 ? n : 0;
+          await this.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Chat retention — max sessions")
+      .setDesc(
+        "Keep at most N chats; oldest pruned first. 0 = unlimited (default). Takes effect on the next chat open.",
+      )
+      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
+        text.setPlaceholder?.("0");
+        text.setValue(String(this.settings.chatRetentionMaxSessions));
+        text.onChange(async (value: string) => {
+          const n = parseInt(value, 10);
+          this.settings.chatRetentionMaxSessions = Number.isFinite(n) && n >= 0 ? n : 0;
+          await this.saveSettings();
+        });
+      });
+
     // ── Ollama ────────────────────────────────────────────────────────────────
     containerEl.createEl("h2", { text: "Gemmera — Ollama" });
 
