@@ -1,4 +1,5 @@
 import type { LLMService, NoteSpec, PromptLoader } from "../contracts";
+import { RetryBudget, withInfraRetry, withJsonRetry } from "./retry-policy";
 
 export interface IngestParserDeps {
   llm: LLMService;
@@ -23,44 +24,102 @@ export type ParseResult =
  * to `[]`) but strict on the required scalars (`title`, `type`, `source`,
  * `body_markdown`). A parse miss returns a typed `ParseResult` so the
  * orchestrator can decide between retry and error-state.
+ *
+ * Retry policy (#51):
+ * - Ollama connection refused → 1 infra retry after 500 ms (does not consume budget).
+ * - Invalid JSON → 1 retry via `budget`; second failure → parse_failed.
+ * - Schema-valid but rule-violating → 1 retry with error feedback via `budget`;
+ *   second failure → schema_failed.
+ * When `budget` is omitted a zero-slot budget is used (no retries, existing behaviour).
  */
 export async function parseContent(
   text: string,
   instruction: string | undefined,
   deps: IngestParserDeps,
   signal?: AbortSignal,
+  budget?: RetryBudget,
 ): Promise<ParseResult> {
   if (!text.trim()) return { ok: false, reason: "empty", raw: "" };
 
   const prompt = await deps.promptLoader.load("ingest-parser");
   const userPrompt = composeUserPrompt(text, instruction);
-
-  const response = await deps.llm.chat({
-    messages: [
-      { role: "system", content: prompt.body + SCHEMA_HINT },
-      { role: "user", content: userPrompt },
-    ],
-    format: "json",
-    stream: false,
-    signal,
-  });
-
-  const raw = response.content?.trim() ?? "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { ok: false, reason: "parse_failed", raw };
-  }
-
-  const spec = coerceSpec(parsed, {
+  const b = budget ?? new RetryBudget(0);
+  const coworkDefaults = {
     runId: (deps.runId ?? defaultRunId)(),
     model: deps.model ?? "gemma3:latest",
     version: deps.version ?? "0.0.1",
-  });
-  if (!spec) return { ok: false, reason: "schema_failed", raw };
+  };
+
+  // Infra-wrapped LLM call. On Ollama connection refused, retries once after
+  // 500 ms then throws; the throw propagates out of parseContent and the
+  // orchestrator enters TOOL_FAILED.
+  const callLlm = (systemContent: string) => async (s?: AbortSignal): Promise<string> => {
+    const resp = await withInfraRetry(
+      () => deps.llm.chat({
+        messages: [
+          { role: "system", content: systemContent },
+          { role: "user", content: userPrompt },
+        ],
+        format: "json",
+        stream: false,
+        signal: s,
+      }),
+      500,
+      s,
+    );
+    return resp.content?.trim() ?? "";
+  };
+
+  const systemContent = prompt.body + SCHEMA_HINT;
+
+  // Step 1 — JSON parse retry.
+  // Invalid JSON → 1 retry (budget slot consumed); second failure → parse_failed.
+  const jsonResult = await withJsonRetry(
+    callLlm(systemContent),
+    safeJsonParse,
+    b,
+    signal,
+  );
+  if (!jsonResult.ok) {
+    return { ok: false, reason: "parse_failed", raw: "" };
+  }
+
+  // Step 2 — Schema validation retry.
+  // Valid JSON but missing required fields → 1 retry with explicit error feedback
+  // appended; second failure → schema_failed.
+  let spec = coerceSpec(jsonResult.value, coworkDefaults);
+  if (!spec) {
+    if (b.consume()) {
+      const hint = buildSchemaHint(jsonResult.value);
+      const retrySystem = systemContent + `\n\nYour previous response failed validation: ${hint}`;
+      const raw2 = await callLlm(retrySystem)(signal);
+      const parsed2 = safeJsonParse(raw2);
+      if (parsed2 !== null) spec = coerceSpec(parsed2, coworkDefaults);
+    }
+    if (!spec) return { ok: false, reason: "schema_failed", raw: "" };
+  }
 
   return { ok: true, spec };
+}
+
+function safeJsonParse(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function buildSchemaHint(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "Response was not a JSON object.";
+  const r = raw as Record<string, unknown>;
+  const missing: string[] = [];
+  if (!r.title || typeof r.title !== "string") missing.push("title (required string)");
+  if (!r.type) missing.push(`type (must be one of: source, evergreen, project, meeting, person, concept)`);
+  if (!r.body_markdown || typeof r.body_markdown !== "string") missing.push("body_markdown (required string)");
+  return missing.length > 0
+    ? `Missing or invalid required fields: ${missing.join("; ")}.`
+    : "One or more field values did not match the required schema.";
 }
 
 function composeUserPrompt(text: string, instruction?: string): string {

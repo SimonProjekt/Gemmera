@@ -1,4 +1,5 @@
 import type {
+  ChatMessage,
   EventLog,
   EventLogEntry,
   LLMService,
@@ -7,6 +8,7 @@ import type {
   RetrievalPayload,
   Retriever,
 } from "../contracts";
+import { RetryBudget, withInfraRetry, withJsonRetry } from "./retry-policy";
 import type { TurnStatusCallback } from "./turn-status";
 import { labelForState } from "./turn-status";
 
@@ -52,6 +54,8 @@ export interface QueryOrchestratorDeps {
   signal?: AbortSignal;
   /** Called synchronously on each state entry so the UI can update its status chip. */
   onStateChange?: TurnStatusCallback;
+  /** Shared retry budget for model-output retries across this turn. */
+  retryBudget?: RetryBudget;
 }
 
 interface LLMQueryResponse {
@@ -97,11 +101,18 @@ export async function runQuery(
   await enter(STATES.planRetrieval);
   const { query } = input;
 
+  const budget = deps.retryBudget ?? new RetryBudget();
+
   // ── RETRIEVE ──────────────────────────────────────────────────────────
+  // Embedding fail → 1 infra retry after 250 ms; second failure → TOOL_FAILED.
   await enter(STATES.retrieve);
   let hits: RetrievalHit[];
   try {
-    hits = await deps.retriever.retrieve(query, { topK: TOP_K_RETRIEVE });
+    hits = await withInfraRetry(
+      () => deps.retriever.retrieve(query, { topK: TOP_K_RETRIEVE }),
+      250,
+      deps.signal,
+    );
   } catch (err) {
     const reason = `retrieve:${stringifyError(err)}`;
     await enter(STATES.failed, { reason });
@@ -115,12 +126,13 @@ export async function runQuery(
   }
 
   // ── RERANK ────────────────────────────────────────────────────────────
+  // Reranker fail → 0 retries, skip and use raw hits per tool-loop.md.
   await enter(STATES.rerank);
   if (deps.reranker) {
     try {
       hits = await deps.reranker.retrieve(query, { topK: TOP_K_RERANK });
     } catch {
-      // Reranker failure: 0 retries, skip and use raw hits per tool-loop.md.
+      // intentional skip
     }
   }
 
@@ -130,67 +142,79 @@ export async function runQuery(
   const validPaths = new Set(payload.chunks.map((c) => c.path));
 
   // ── GENERATE ──────────────────────────────────────────────────────────
+  // Ollama connection refused → 1 infra retry after 500 ms.
+  // Invalid JSON → 1 model-output retry consuming from budget.
   await enter(STATES.generate);
   const model = deps.model ?? (await deps.llm.pickDefaultModel());
   const systemPrompt = buildSystemPrompt();
   const userMessage = buildUserMessage(query, payload);
 
+  const callLlm = (messages: ChatMessage[]) =>
+    async (signal?: AbortSignal): Promise<string> => {
+      const response = await withInfraRetry(
+        () => deps.llm.chat({ messages, model, format: "json", signal }),
+        500,
+        signal,
+      );
+      return response.content;
+    };
+
   let llmRaw: string;
+  let parsed: LLMQueryResponse | null;
   try {
-    const response = await deps.llm.chat({
-      messages: [
+    const jsonResult = await withJsonRetry(
+      callLlm([
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
-      ],
-      model,
-      format: "json",
-      signal: deps.signal,
-    });
-    llmRaw = response.content;
+      ]),
+      parseQueryResponse,
+      budget,
+      deps.signal,
+    );
+    if (!jsonResult.ok) {
+      await enter(STATES.failed, { reason: "generate:invalid_json" });
+      return { kind: "failed", reason: "generate:invalid_json" };
+    }
+    llmRaw = ""; // not needed downstream; value captured in jsonResult
+    parsed = jsonResult.value;
   } catch (err) {
     const reason = `generate:${stringifyError(err)}`;
     await enter(STATES.failed, { reason });
     return { kind: "failed", reason };
   }
 
-  let parsed = parseQueryResponse(llmRaw);
-  if (!parsed) {
-    const reason = "generate:invalid_json";
-    await enter(STATES.failed, { reason });
-    return { kind: "failed", reason };
-  }
-
   // ── VALIDATE_CITATIONS ────────────────────────────────────────────────
+  // Hallucinated citations → 1 feedback retry consuming from budget;
+  // second failure → VALIDATION_FAILED.
   await enter(STATES.validateCitations, { citationCount: parsed.citations.length });
   const invalid = parsed.citations.filter((p) => !validPaths.has(p));
 
   if (invalid.length > 0) {
     // ── RETRY_WITH_CONSTRAINED_CITATIONS ─────────────────────────────
+    if (!budget.consume()) {
+      await enter(STATES.validationFailed, { reason: "budget_exhausted" });
+      return { kind: "validation_failed", answer: parsed.answer };
+    }
+
     const allowed = [...validPaths];
     await enter(STATES.retryConstrainedCitations, { invalid, allowed });
 
     const retryMessage = buildRetryMessage(allowed);
-    let retryRaw: string;
+    let retryParsed: LLMQueryResponse | null;
     try {
-      const retryResponse = await deps.llm.chat({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-          { role: "assistant", content: llmRaw },
-          { role: "user", content: retryMessage },
-        ],
-        model,
-        format: "json",
-        signal: deps.signal,
-      });
-      retryRaw = retryResponse.content;
+      const retryRaw = await callLlm([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+        { role: "assistant", content: JSON.stringify(parsed) },
+        { role: "user", content: retryMessage },
+      ])(deps.signal);
+      retryParsed = parseQueryResponse(retryRaw);
     } catch (err) {
       const reason = `retry:${stringifyError(err)}`;
       await enter(STATES.failed, { reason });
       return { kind: "failed", reason };
     }
 
-    const retryParsed = parseQueryResponse(retryRaw);
     if (!retryParsed) {
       await enter(STATES.validationFailed, { reason: "retry:invalid_json" });
       return { kind: "validation_failed", answer: parsed.answer };
