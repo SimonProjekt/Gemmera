@@ -54,29 +54,20 @@ class NotePreviewModal extends Modal {
 
     // Title
     contentEl.createEl("label", { text: "Title", cls: "gemmera-note-preview__label" });
-    const titleInput = contentEl.createEl("input", {
-      type: "text",
-      cls: "gemmera-note-preview__input",
-      value: this.opts.title,
-    } as Parameters<HTMLElement["createEl"]>[1]);
+    const titleInput = contentEl.createEl("input", { cls: "gemmera-note-preview__input" });
+    titleInput.type = "text";
     titleInput.value = this.opts.title;
 
     // Folder
     contentEl.createEl("label", { text: "Folder", cls: "gemmera-note-preview__label" });
-    const folderInput = contentEl.createEl("input", {
-      type: "text",
-      cls: "gemmera-note-preview__input",
-      value: this.opts.folder,
-    } as Parameters<HTMLElement["createEl"]>[1]);
+    const folderInput = contentEl.createEl("input", { cls: "gemmera-note-preview__input" });
+    folderInput.type = "text";
     folderInput.value = this.opts.folder;
 
     // Tags
     contentEl.createEl("label", { text: "Tags (comma-separated)", cls: "gemmera-note-preview__label" });
-    const tagsInput = contentEl.createEl("input", {
-      type: "text",
-      cls: "gemmera-note-preview__input",
-      value: this.opts.tags.join(", "),
-    } as Parameters<HTMLElement["createEl"]>[1]);
+    const tagsInput = contentEl.createEl("input", { cls: "gemmera-note-preview__input" });
+    tagsInput.type = "text";
     tagsInput.value = this.opts.tags.join(", ");
 
     // Body preview
@@ -93,20 +84,42 @@ class NotePreviewModal extends Modal {
       text: "Save",
       cls: "gemmera-note-preview__btn gemmera-note-preview__btn--primary",
     });
-    saveBtn.addEventListener("click", () => {
+
+    const doSave = (): void => {
+      const title = titleInput.value.trim();
+      if (!title) return;
       this.decide({
         confirmed: true,
-        title: titleInput.value.trim() || this.opts.title,
+        title,
         folder: folderInput.value.trim() || this.opts.folder,
         tags: tagsInput.value.split(",").map((t) => t.trim()).filter(Boolean),
       });
-    });
+    };
+
+    // Disable Save when title is empty.
+    const updateSaveEnabled = (): void => {
+      saveBtn.disabled = titleInput.value.trim().length === 0;
+    };
+    titleInput.addEventListener("input", updateSaveEnabled);
+    updateSaveEnabled();
+
+    saveBtn.addEventListener("click", doSave);
+
+    // Enter in any input field triggers Save (Obsidian convention).
+    for (const input of [titleInput, folderInput, tagsInput]) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); doSave(); }
+      });
+    }
 
     const cancelBtn = actions.createEl("button", {
       text: "Cancel",
       cls: "gemmera-note-preview__btn",
     });
     cancelBtn.addEventListener("click", () => this.decide(null));
+
+    titleInput.focus();
+    titleInput.select();
   }
 
   onClose(): void {

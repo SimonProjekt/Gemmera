@@ -1,22 +1,10 @@
-import type { IndexService, LLMToolCall, VaultService } from "../contracts";
-import type { IngestWriter } from "./ingest-writer";
+import type { LLMToolCall, VaultService } from "../contracts";
 import type { NotePreviewResult } from "../ui/note-preview-modal";
-
-// ── Tool argument shapes ──────────────────────────────────────────────────────
-
-export interface SaveNoteCreateArgs {
-  mode: "create";
-  title: string;
-  body_markdown: string;
-  tags?: string[];
-}
 
 // ── Deps ──────────────────────────────────────────────────────────────────────
 
 export interface ToolDispatchDeps {
   vault: VaultService;
-  ingestWriter: IngestWriter;
-  index: IndexService;
   /** Default folder for new notes (e.g. "Inbox/"). */
   inboxFolder: string;
   /**
@@ -36,7 +24,7 @@ export interface ToolDispatchDeps {
 // ── Result ────────────────────────────────────────────────────────────────────
 
 export type ToolResult =
-  | { kind: "done"; summary: string }
+  | { kind: "done"; summary: string; citations?: string[] }
   | { kind: "cancelled"; message: string }
   | { kind: "unknown_tool" };
 
@@ -55,8 +43,8 @@ export async function dispatchToolCall(
   switch (call.name) {
     case "save_note": {
       const args = call.arguments as { mode?: string; title?: string; body_markdown?: string; tags?: string[] };
-      if (args.mode === "create" || !args.mode) {
-        return dispatchSaveNoteCreate(args as SaveNoteCreateArgs, deps);
+      if (!args.mode || args.mode === "create") {
+        return dispatchSaveNoteCreate(args, deps);
       }
       return { kind: "unknown_tool" };
     }
@@ -68,7 +56,7 @@ export async function dispatchToolCall(
 // ── save_note (create) ────────────────────────────────────────────────────────
 
 async function dispatchSaveNoteCreate(
-  args: SaveNoteCreateArgs,
+  args: { title?: string; body_markdown?: string; tags?: string[] },
   deps: ToolDispatchDeps,
 ): Promise<ToolResult> {
   const result = await deps.openNotePreview({
@@ -85,7 +73,7 @@ async function dispatchSaveNoteCreate(
 
   const folder = result.folder.endsWith("/") ? result.folder : result.folder + "/";
   const safeName = result.title.replace(/[\\/:*?"<>|]/g, "_");
-  const path = `${folder}${safeName}.md`;
+  const path = await findUniquePath(deps.vault, folder, safeName);
 
   const frontmatter = buildFrontmatter(result.title, result.tags);
   const content = `${frontmatter}\n${args.body_markdown ?? ""}`;
@@ -94,10 +82,23 @@ async function dispatchSaveNoteCreate(
   return { kind: "done", summary: `Saved **${result.title}** to ${path}` };
 }
 
-function buildFrontmatter(title: string, tags: string[]): string {
-  const lines = ["---", `title: "${title}"`];
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function findUniquePath(vault: VaultService, folder: string, name: string): Promise<string> {
+  const base = `${folder}${name}.md`;
+  if (!await vault.exists(base)) return base;
+  for (let i = 2; i <= 99; i++) {
+    const candidate = `${folder}${name} (${i}).md`;
+    if (!await vault.exists(candidate)) return candidate;
+  }
+  return `${folder}${name} (${Date.now()}).md`;
+}
+
+/** Build a YAML frontmatter block. Strings are JSON-escaped (valid YAML double-quoted scalars). */
+export function buildFrontmatter(title: string, tags: string[]): string {
+  const lines = ["---", `title: ${JSON.stringify(title)}`];
   if (tags.length > 0) {
-    lines.push(`tags: [${tags.map((t) => `"${t}"`).join(", ")}]`);
+    lines.push(`tags: [${tags.map((t) => JSON.stringify(t)).join(", ")}]`);
   }
   lines.push("---");
   return lines.join("\n");

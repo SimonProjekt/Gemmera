@@ -11,7 +11,7 @@ import { runIngest } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
 import { createSynthesisNote } from "./services/synthesis-writer";
-import { dispatchToolCall, SAVE_NOTE_TOOL } from "./services/tool-dispatcher";
+import { dispatchToolCall, SAVE_NOTE_TOOL, type ToolDispatchDeps } from "./services/tool-dispatcher";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
@@ -480,19 +480,23 @@ export class GemmeraChatView extends ItemView {
 
       // Dispatch structured tool calls emitted by the LLM (#53).
       if (reply.toolCalls && reply.toolCalls.length > 0) {
-        const dispatchDeps = {
+        const dispatchDeps: ToolDispatchDeps = {
           vault: this.services.vault,
-          ingestWriter: this.services.ingestWriter,
-          index: this.services.index,
           inboxFolder: this.settings.inboxFolder,
-          openNotePreview: (opts: Parameters<typeof openNotePreview>[1]) =>
-            openNotePreview(this.app, opts),
-          appendSystemMessage: (msg: string) => this.appendMessage("assistant", msg),
+          openNotePreview: (opts) => openNotePreview(this.app, opts),
+          appendSystemMessage: (msg) => this.appendMessage("assistant", msg),
         };
         for (const call of reply.toolCalls) {
-          const result = await dispatchToolCall(call, dispatchDeps);
-          if (result.kind === "done") {
-            this.appendMessage("assistant", result.summary);
+          try {
+            const result = await dispatchToolCall(call, dispatchDeps);
+            if (result.kind === "done") {
+              this.appendMessage("assistant", result.summary);
+            } else if (result.kind === "unknown_tool") {
+              this.appendMessage("assistant", `Unknown tool: ${call.name}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.appendMessage("assistant", `Tool call failed: ${msg}`);
           }
         }
       }
