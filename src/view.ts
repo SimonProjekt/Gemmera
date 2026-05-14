@@ -53,6 +53,12 @@ export class GemmeraChatView extends ItemView {
   private contextPanel: ContextPanel | null = null;
   private recentCaptures: RecentCapture[] = [];
   private readonly RECENT_CAPTURE_CAP = 8;
+  // Tracks the auto-confirm half of the inline-preview's edit→confirm
+  // two-step (#55). The first preview call renders the form and returns
+  // {action: "edit", spec: edited}; the orchestrator loops back with the
+  // edited spec and this flag short-circuits to {action: "confirm"} so the
+  // user only clicks Save once.
+  private inlinePreviewAutoConfirm = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -367,19 +373,51 @@ export class GemmeraChatView extends ItemView {
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     } finally {
       this.contextPanel?.setIdle(this.recentCaptures);
+      // Guard against a stuck auto-confirm if the orchestrator threw between
+      // the `edit` decision and its follow-up preview call — without this, the
+      // next save turn would silently skip the form.
+      this.inlinePreviewAutoConfirm = false;
     }
   }
 
   private routeIngestPreview(preview: IngestPreview): Promise<PreviewDecision> {
-    // The split modal handles 1..N candidates uniformly (the "i of N" header
-    // reads cleanly even when N=1). `openIngestPreview` doesn't know about
-    // `split_confirm`, so a split preview falling through to it would emit
-    // `{ action: "confirm" }` and the orchestrator would reject it with
-    // `invalid_split_action`. Always route splits through `openSplitPreview`.
+    // Auto-confirm the second leg of the inline edit→confirm two-step. The
+    // flag is only set after a kind:"save" preview, so it's safe to consume
+    // before deciding which UI surface to open next.
+    if (this.inlinePreviewAutoConfirm) {
+      this.inlinePreviewAutoConfirm = false;
+      return Promise.resolve({ action: "confirm" });
+    }
+    // Split previews always go through openSplitPreview (handles 1..N
+    // candidates uniformly). openIngestPreview doesn't know about
+    // `split_confirm` and would emit `{ action: "confirm" }` that the
+    // orchestrator rejects as `invalid_split_action`.
     if (preview.kind === "split" && preview.candidates && preview.candidates.length > 0) {
       return openSplitPreview(this.app, preview.candidates, { folder: this.settings.inboxFolder });
     }
+    if (this.shouldUseInlinePreview(preview)) {
+      return this.openInlinePreview(preview);
+    }
     return openIngestPreview(this.app, preview);
+  }
+
+  private shouldUseInlinePreview(preview: IngestPreview): boolean {
+    // Inline preview only replaces the editable save form. Append, dedup-ask,
+    // and split previews keep their modals — they have richer button rows
+    // and (for split) their own queue UX.
+    if (preview.kind !== "save") return false;
+    if (!this.settings.inlinePreviewInWidePanel) return false;
+    if (!this.contextPanel) return false;
+    return this.contextPanel.isWideLayoutActive();
+  }
+
+  private openInlinePreview(preview: IngestPreview): Promise<PreviewDecision> {
+    return new Promise((resolve) => {
+      this.contextPanel?.setInlinePreview(preview, this.settings.inboxFolder, (decision) => {
+        if (decision.action === "edit") this.inlinePreviewAutoConfirm = true;
+        resolve(decision);
+      });
+    });
   }
 
   private recordCapture(path: string): void {
@@ -479,6 +517,7 @@ export class GemmeraChatView extends ItemView {
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     } finally {
       this.contextPanel?.setIdle(this.recentCaptures);
+      this.inlinePreviewAutoConfirm = false;
     }
   }
 

@@ -540,3 +540,25 @@
   margin: 4px 0 0;
   line-height: 1.4;
 }
+
+/* ── Inline preview in context panel (#55) ───────────────────────────────── */
+
+.gemmera-inline-preview {
+  /* Reuse .gemmera-note-preview__* widget styles inside the panel column. */
+  font-size: 0.85rem;
+}
+
+.gemmera-inline-preview .gemmera-note-preview__input {
+  font-size: 0.85rem;
+}
+
+.gemmera-inline-preview .gemmera-note-preview__actions {
+  margin-top: 12px;
+  justify-content: flex-start;
+}
+
+.gemmera-context-content--inline-preview {
+  /* Keep the form anchored to the top of the panel column so the buttons
+     stay reachable when the panel scrolls. */
+  align-items: stretch;
+}

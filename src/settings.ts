@@ -21,6 +21,14 @@ export interface GemmeraSettings {
    */
   alwaysPreviewBeforeSave: boolean;
 
+  /**
+   * When true (and the chat pane is wide enough to show the context panel),
+   * the preview form renders inline in the right-side panel instead of
+   * opening a modal. Falls back to the modal in narrow layout. Default off.
+   * Wired to Settings → "Inline preview in wide panel" (#55).
+   */
+  inlinePreviewInWidePanel: boolean;
+
   /** Folder for new ingest notes. Default `Inbox/`. */
   inboxFolder: string;
 
@@ -76,6 +84,7 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   llmBackend: "ollama",
   showClassifierDecisions: false,
   alwaysPreviewBeforeSave: true,
+  inlinePreviewInWidePanel: false,
   inboxFolder: "Inbox/",
   dedupThreshold: 0.85,
   ollamaPathMode: "auto",

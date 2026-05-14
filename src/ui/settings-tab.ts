@@ -208,6 +208,19 @@ export class GemmeraSettingsTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("Inline preview in wide panel")
+      .setDesc(
+        "Render the pre-save preview inside the right-side context panel instead of opening a modal. Only takes effect when the chat pane is wide enough to show the panel; narrow layouts always use the modal.",
+      )
+      .addToggle((toggle) => {
+        toggle.setValue(this.settings.inlinePreviewInWidePanel);
+        toggle.onChange(async (value) => {
+          this.settings.inlinePreviewInWidePanel = value;
+          await this.saveSettings();
+        });
+      });
+
     // ── Chat retention (#43) ───────────────────────────────────────────
     new Setting(containerEl)
       .setName("Chat retention — max days")
