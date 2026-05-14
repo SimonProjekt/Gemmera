@@ -371,7 +371,12 @@ export class GemmeraChatView extends ItemView {
   }
 
   private routeIngestPreview(preview: IngestPreview): Promise<PreviewDecision> {
-    if (preview.kind === "split" && preview.candidates && preview.candidates.length > 1) {
+    // The split modal handles 1..N candidates uniformly (the "i of N" header
+    // reads cleanly even when N=1). `openIngestPreview` doesn't know about
+    // `split_confirm`, so a split preview falling through to it would emit
+    // `{ action: "confirm" }` and the orchestrator would reject it with
+    // `invalid_split_action`. Always route splits through `openSplitPreview`.
+    if (preview.kind === "split" && preview.candidates && preview.candidates.length > 0) {
       return openSplitPreview(this.app, preview.candidates, { folder: this.settings.inboxFolder });
     }
     return openIngestPreview(this.app, preview);

@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Modal, type App } from "obsidian";
+import { Component, MarkdownRenderer, Modal, type App } from "obsidian";
 import type { NoteSpec } from "../contracts/ingest";
 import type { PreviewDecision } from "../services/ingest-orchestrator";
 import {
@@ -13,13 +13,19 @@ import {
  *
  * Walks the candidates sequentially, opening one modal per candidate with
  * a "i of N" indicator. Three outcomes per modal:
- *   - Save     → push the edited NoteSpec to `confirmed`, advance.
- *   - Skip     → advance without pushing.
- *   - Cancel   → break the loop; whatever was already confirmed still ships.
+ *   - Save        → push the edited NoteSpec to `confirmed`, advance.
+ *   - Skip        → advance without pushing.
+ *   - Cancel all  → break the loop; whatever was already confirmed still ships.
+ *   - Esc / outside-click → cancel-all (matches NotePreviewModal semantics).
  *
  * If nothing was confirmed by the time the loop ends, the decision collapses
  * to `{ action: "cancel" }` so the orchestrator's split_saved branch doesn't
  * fire an empty "saved 0 notes" notice.
+ *
+ * Folder is intentionally NOT editable per-candidate: the ingest orchestrator
+ * writes every split candidate into `deps.inboxFolder`, so a per-modal Folder
+ * input would silently discard the user's edit. If per-candidate placement is
+ * needed later, plumb `folder` through `NoteSpec` and the writer first.
  */
 export interface SplitPreviewDefaults {
   folder: string;
@@ -30,18 +36,15 @@ export async function openSplitPreview(
   candidates: NoteSpec[],
   defaults: SplitPreviewDefaults,
 ): Promise<PreviewDecision> {
-  const confirmed: NoteSpec[] = [];
+  // Collect outcomes then reduce, so the production path goes through the
+  // exact same logic the tests exercise.
+  const outcomes: OneOutcome[] = [];
   for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    const outcome = await openOne(app, candidate, defaults.folder, i, candidates.length);
-    if (outcome.kind === "saved") {
-      confirmed.push(applyEditsToSpec(candidate, outcome.result));
-    } else if (outcome.kind === "cancelled") {
-      break;
-    }
+    const outcome = await openOne(app, candidates[i], defaults.folder, i, candidates.length);
+    outcomes.push(outcome);
+    if (outcome.kind === "cancelled") break;
   }
-  if (confirmed.length === 0) return { action: "cancel" };
-  return { action: "split_confirm", confirmed };
+  return reduceSplitOutcomes(candidates, outcomes);
 }
 
 type OneOutcome =
@@ -79,6 +82,7 @@ function applyEditsToSpec(base: NoteSpec, edits: NotePreviewResult): NoteSpec {
 
 class SplitPreviewModal extends Modal {
   private resolved = false;
+  private readonly renderOwner = new Component();
 
   constructor(
     app: App,
@@ -92,17 +96,16 @@ class SplitPreviewModal extends Modal {
   }
 
   onOpen(): void {
+    this.renderOwner.load();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("gemmera-note-preview");
-    contentEl.addClass("gemmera-split-preview");
 
     contentEl.createEl("h2", {
       text: `Save split note (${this.index + 1} of ${this.total})`,
     });
 
     const titleInput = this.makeInput(contentEl, "Title", this.candidate.title);
-    const folderInput = this.makeInput(contentEl, "Folder", this.fallbackFolder);
     const typeSelect = this.makeSelect(contentEl, "Type", NOTE_TYPES, this.candidate.type);
     const statusSelect = this.makeSelect(contentEl, "Status", NOTE_STATUSES, this.candidate.status);
     const tagsInput = this.makeInput(contentEl, "Tags (comma-separated)", this.candidate.tags.join(", "));
@@ -111,11 +114,16 @@ class SplitPreviewModal extends Modal {
       "Aliases (comma-separated)",
       this.candidate.aliases.join(", "),
     );
-    const summaryInput = this.makeTextarea(contentEl, "Summary (1–600 chars, required)", this.candidate.summary);
+    const summaryInput = this.makeTextarea(
+      contentEl,
+      "Summary (1–600 chars, required)",
+      this.candidate.summary,
+      "Required: 1–2 sentences summarizing this section",
+    );
 
     contentEl.createEl("p", { text: "Preview", cls: "gemmera-note-preview__label" });
     const previewEl = contentEl.createEl("div", { cls: "gemmera-note-preview__body" });
-    MarkdownRenderer.render(this.app, this.candidate.body_markdown, previewEl, "", this).catch(() => {
+    MarkdownRenderer.render(this.app, this.candidate.body_markdown, previewEl, "", this.renderOwner).catch(() => {
       previewEl.textContent = this.candidate.body_markdown;
     });
 
@@ -132,7 +140,7 @@ class SplitPreviewModal extends Modal {
 
     const collectRaw = () => ({
       title: titleInput.value,
-      folder: folderInput.value,
+      folder: this.fallbackFolder,
       type: typeSelect.value,
       status: statusSelect.value,
       tags: tagsInput.value,
@@ -157,7 +165,7 @@ class SplitPreviewModal extends Modal {
         errorEl.style.display = "none";
       }
     };
-    for (const el of [titleInput, folderInput, tagsInput, aliasesInput, summaryInput]) {
+    for (const el of [titleInput, tagsInput, aliasesInput, summaryInput]) {
       el.addEventListener("input", updateSaveEnabled);
     }
     for (const sel of [typeSelect, statusSelect]) {
@@ -173,7 +181,7 @@ class SplitPreviewModal extends Modal {
       e.preventDefault();
       doSave();
     });
-    for (const input of [titleInput, folderInput, tagsInput, aliasesInput]) {
+    for (const input of [titleInput, tagsInput, aliasesInput]) {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); doSave(); }
       });
@@ -184,12 +192,13 @@ class SplitPreviewModal extends Modal {
   }
 
   onClose(): void {
+    this.renderOwner.unload();
     if (!this.resolved) {
       this.resolved = true;
-      // Esc / outside-click during split mode means "skip this one" — the
-      // user retains the option to cancel the rest explicitly, and prior
-      // confirmed siblings are preserved either way.
-      this.onDone({ kind: "skipped" });
+      // Esc / outside-click cancels the whole sequence — matches the single
+      // NotePreviewModal so users don't have to remember two different
+      // dismissal semantics. Use the Skip button to skip just this candidate.
+      this.onDone({ kind: "cancelled" });
     }
   }
 
@@ -207,11 +216,17 @@ class SplitPreviewModal extends Modal {
     return input;
   }
 
-  private makeTextarea(parent: HTMLElement, label: string, value: string): HTMLTextAreaElement {
+  private makeTextarea(
+    parent: HTMLElement,
+    label: string,
+    value: string,
+    placeholder: string,
+  ): HTMLTextAreaElement {
     parent.createEl("label", { text: label, cls: "gemmera-note-preview__label" });
     const ta = parent.createEl("textarea", { cls: "gemmera-note-preview__input gemmera-note-preview__textarea" });
     ta.rows = 3;
     ta.value = value;
+    ta.placeholder = placeholder;
     return ta;
   }
 
@@ -234,8 +249,8 @@ class SplitPreviewModal extends Modal {
 
 /**
  * Pure helper exported for tests: derives the final PreviewDecision from a
- * sequence of per-candidate outcomes. Keeps the orchestration logic in
- * `openSplitPreview` testable without spinning up Obsidian modals.
+ * sequence of per-candidate outcomes. `openSplitPreview` calls this directly,
+ * so the tests exercise the exact code path production uses.
  */
 export function reduceSplitOutcomes(
   candidates: NoteSpec[],
