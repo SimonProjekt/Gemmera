@@ -1,4 +1,4 @@
-import { Notice, PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
+import { Notice, PluginSettingTab, Setting, type App, type Plugin, type TextComponent } from "obsidian";
 import type { DriftReport, IngestionStore } from "../contracts";
 import { HARD_STOPS } from "../contracts/hard-stops";
 import type { OllamaLifecycle } from "../services/ollama-lifecycle";
@@ -214,9 +214,13 @@ export class GemmeraSettingsTab extends PluginSettingTab {
       .setDesc(
         "Drop chats older than this many days. 0 = unlimited (default). Takes effect on the next prune (chat open).",
       )
-      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
-        text.setPlaceholder?.("0");
+      .addText((text: TextComponent) => {
+        text.setPlaceholder("0");
         text.setValue(String(this.settings.chatRetentionMaxDays));
+        // type="number" min="0" gives browser-native clamp + spinner so
+        // a typo can't silently coerce to 0 (= unlimited). #152 review.
+        text.inputEl.type = "number";
+        text.inputEl.min = "0";
         text.onChange(async (value: string) => {
           const n = parseInt(value, 10);
           this.settings.chatRetentionMaxDays = Number.isFinite(n) && n >= 0 ? n : 0;
@@ -229,9 +233,11 @@ export class GemmeraSettingsTab extends PluginSettingTab {
       .setDesc(
         "Keep at most N chats; oldest pruned first. 0 = unlimited (default). Takes effect on the next prune (chat open).",
       )
-      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
-        text.setPlaceholder?.("0");
+      .addText((text: TextComponent) => {
+        text.setPlaceholder("0");
         text.setValue(String(this.settings.chatRetentionMaxSessions));
+        text.inputEl.type = "number";
+        text.inputEl.min = "0";
         text.onChange(async (value: string) => {
           const n = parseInt(value, 10);
           this.settings.chatRetentionMaxSessions = Number.isFinite(n) && n >= 0 ? n : 0;
