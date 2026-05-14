@@ -25,6 +25,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run retrieval eval (mock + regression gate)
+        run: npm run eval:retrieval:ci
+
   build:
     name: Production build
     runs-on: ubuntu-latest
