@@ -10,10 +10,14 @@
  * payload metrics, persistence, and a regression gate.
  *
  * Modes:
- *   --mock              Deterministic in-process embedder (default for now).
+ *   --mock              Deterministic in-process embedder (the only mode
+ *                       wired right now; accepted as a no-op for clarity).
+ *   --live              Reserved for a real-Ollama embedder. Currently
+ *                       errors with a pointer to eval/README.md so the
+ *                       user is never silently downgraded to mock.
  *   --shard <name>      Run a single shard. Default: all known shards.
- *   --compare <path>    Reserved for Phase 5 (regression gate).
- *   --save-baseline <p> Reserved for Phase 5.
+ *   --compare <path>    Run the regression gate against a baseline JSON.
+ *   --save-baseline <p> Write the run's headline metrics to <p>.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -45,8 +49,14 @@ import { checkRegression, type BaselineMetrics } from "./regression-gate";
 // ─── CLI ──────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
-// `--mock` is the current default; real-embedder mode lands in a later phase.
-const _useMock = argv.includes("--mock") || !argv.includes("--live");
+if (argv.includes("--live")) {
+  console.error(
+    "[eval:retrieval] --live (real-Ollama embedder) is not wired yet. " +
+      "See eval/README.md for status. Run without --live (or with --mock) " +
+      "to use the deterministic mock embedder.",
+  );
+  process.exit(2);
+}
 const shardArg = flagValue("--shard") as ShardName | undefined;
 const compareArg = flagValue("--compare");
 const saveBaselineArg = flagValue("--save-baseline");
