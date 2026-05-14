@@ -313,8 +313,17 @@
   border: none;
 }
 
+.gemmera-note-preview__textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+}
+
+/* `--text-error` is not part of Obsidian's documented theme tokens; fall
+ * back to a readable red so the error message stays visible in themes
+ * that don't define it. */
 .gemmera-note-preview__error {
-  color: var(--text-error);
+  color: var(--text-error, #e74c3c);
   font-size: 0.85rem;
   margin: 8px 0 0;
 }

@@ -8,6 +8,7 @@ const base = {
   status: "inbox",
   tags: "pet, animal",
   aliases: "Canine",
+  summary: "Notes about dogs.",
 };
 
 describe("validateNotePreview", () => {
@@ -23,6 +24,7 @@ describe("validateNotePreview", () => {
       status: "inbox",
       tags: ["pet", "animal"],
       aliases: ["Canine"],
+      summary: "Notes about dogs.",
     });
   });
 
@@ -44,6 +46,16 @@ describe("validateNotePreview", () => {
   it("rejects an out-of-enum status", () => {
     const out = validateNotePreview({ ...base, status: "bogus" }, "Inbox/");
     expect("error" in out && out.error).toMatch(/status/i);
+  });
+
+  it("rejects an empty / whitespace summary (rag.md schema requires 1+ chars)", () => {
+    const out = validateNotePreview({ ...base, summary: "   " }, "Inbox/");
+    expect("error" in out && out.error).toMatch(/summary/i);
+  });
+
+  it("rejects a summary longer than 600 chars", () => {
+    const out = validateNotePreview({ ...base, summary: "x".repeat(601) }, "Inbox/");
+    expect("error" in out && out.error).toMatch(/600/);
   });
 
   it("falls back to the default folder when blank", () => {

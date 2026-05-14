@@ -14,6 +14,7 @@ export interface NotePreviewOpts {
   aliases?: string[];
   type?: NoteType;
   status?: NoteStatus;
+  summary?: string;
 }
 
 export interface NotePreviewResult {
@@ -24,16 +25,18 @@ export interface NotePreviewResult {
   aliases: string[];
   type: NoteType;
   status: NoteStatus;
+  summary: string;
 }
 
 const MAX_TITLE_LEN = 120;
+const MAX_SUMMARY_LEN = 600;
 
 /**
  * Pre-save commit gate for save_note(mode=create) (#52, #53).
  *
  * Shows editable title, folder, frontmatter form (type, status, tags,
- * aliases) over the rag.md contract, and a Markdown body preview. The
- * modal resolves a Promise the dispatcher awaits. Closing via Esc or
+ * aliases, summary) over the rag.md contract, and a Markdown body preview.
+ * The modal resolves a Promise the dispatcher awaits. Closing via Esc or
  * outside-click resolves to null (cancelled). Cmd/Ctrl+Enter confirms.
  */
 export function openNotePreview(
@@ -83,6 +86,11 @@ class NotePreviewModal extends Modal {
       "Aliases (comma-separated)",
       (this.opts.aliases ?? []).join(", "),
     );
+    const summaryInput = this.makeTextarea(
+      contentEl,
+      `Summary (1–${MAX_SUMMARY_LEN} chars, required)`,
+      this.opts.summary ?? "",
+    );
 
     contentEl.createEl("p", { text: "Preview", cls: "gemmera-note-preview__label" });
     const previewEl = contentEl.createEl("div", { cls: "gemmera-note-preview__body" });
@@ -100,18 +108,18 @@ class NotePreviewModal extends Modal {
       cls: "gemmera-note-preview__btn gemmera-note-preview__btn--primary",
     });
 
+    const collectRaw = () => ({
+      title: titleInput.value,
+      folder: folderInput.value,
+      type: typeSelect.value,
+      status: statusSelect.value,
+      tags: tagsInput.value,
+      aliases: aliasesInput.value,
+      summary: summaryInput.value,
+    });
+
     const doSave = (): void => {
-      const result = validateNotePreview(
-        {
-          title: titleInput.value,
-          folder: folderInput.value,
-          type: typeSelect.value,
-          status: statusSelect.value,
-          tags: tagsInput.value,
-          aliases: aliasesInput.value,
-        },
-        this.opts.folder,
-      );
+      const result = validateNotePreview(collectRaw(), this.opts.folder);
       if ("error" in result) {
         errorEl.textContent = result.error;
         errorEl.style.display = "block";
@@ -120,10 +128,22 @@ class NotePreviewModal extends Modal {
       this.decide(result.value);
     };
 
+    // Run the full validator so the gate stays correct even if the type/status
+    // <select> elements are ever replaced with free-text inputs.
     const updateSaveEnabled = (): void => {
-      saveBtn.disabled = titleInput.value.trim().length === 0;
+      const result = validateNotePreview(collectRaw(), this.opts.folder);
+      saveBtn.disabled = "error" in result;
+      // Clear any stale error once the form becomes valid again.
+      if (!("error" in result) && errorEl.style.display !== "none") {
+        errorEl.style.display = "none";
+      }
     };
-    titleInput.addEventListener("input", updateSaveEnabled);
+    for (const el of [titleInput, folderInput, tagsInput, aliasesInput, summaryInput]) {
+      el.addEventListener("input", updateSaveEnabled);
+    }
+    for (const sel of [typeSelect, statusSelect]) {
+      sel.addEventListener("change", updateSaveEnabled);
+    }
     updateSaveEnabled();
 
     saveBtn.addEventListener("click", doSave);
@@ -134,7 +154,8 @@ class NotePreviewModal extends Modal {
       doSave();
     });
 
-    // Enter inside a text input also confirms (Obsidian convention).
+    // Enter inside a single-line input also confirms (Obsidian convention).
+    // The summary textarea is excluded so multiline summaries stay editable.
     for (const input of [titleInput, folderInput, tagsInput, aliasesInput]) {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); doSave(); }
@@ -172,6 +193,14 @@ class NotePreviewModal extends Modal {
     return input;
   }
 
+  private makeTextarea(parent: HTMLElement, label: string, value: string): HTMLTextAreaElement {
+    parent.createEl("label", { text: label, cls: "gemmera-note-preview__label" });
+    const ta = parent.createEl("textarea", { cls: "gemmera-note-preview__input gemmera-note-preview__textarea" });
+    ta.rows = 3;
+    ta.value = value;
+    return ta;
+  }
+
   private makeSelect<T extends string>(
     parent: HTMLElement,
     label: string,
@@ -197,6 +226,7 @@ export function validateNotePreview(
     status: string;
     tags: string;
     aliases: string;
+    summary: string;
   },
   fallbackFolder: string,
 ): { value: NotePreviewResult } | { error: string } {
@@ -211,6 +241,11 @@ export function validateNotePreview(
   if (!(NOTE_STATUSES as readonly string[]).includes(raw.status)) {
     return { error: `Status must be one of: ${NOTE_STATUSES.join(", ")}.` };
   }
+  const summary = raw.summary.trim();
+  if (!summary) return { error: "Summary is required." };
+  if (summary.length > MAX_SUMMARY_LEN) {
+    return { error: `Summary must be ≤ ${MAX_SUMMARY_LEN} characters.` };
+  }
   return {
     value: {
       confirmed: true,
@@ -220,6 +255,7 @@ export function validateNotePreview(
       status: raw.status as NoteStatus,
       tags: splitCsv(raw.tags),
       aliases: splitCsv(raw.aliases),
+      summary,
     },
   };
 }
