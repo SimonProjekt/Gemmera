@@ -89,18 +89,18 @@ class ScriptedClassifierLLM implements LLMService {
     let confidence = 0.78;
     let rationale = "Default: treating as a question.";
 
+    const saveVerb = String.raw`(?:spara|save|lagra|store|capture|anteckna|notera|skriv ner|arkivera|lägg\s+(?:till|in)|add|put|create.*note)`;
+    const retrieveVerb = String.raw`(?:berätta|tell|find|hitta|sök|search|show|visa|sammanfatta|summari[sz]e|relaterade|related|ge mig|give me|översikt|overview|vad jag vet|what i know)`;
     const isMixed =
-      /\b(spara|save|lagra|anteckna|notera|skriv ner|arkivera)\b.*\b(och|and)\b.*\b(berätta|tell|find|hitta|sök|search|sammanfatta|summari[sz]e|relaterade|related)\b/i.test(
-        text,
-      ) ||
-      /\b(berätta|tell|find|hitta|sök|search)\b.*\b(och|and)\b.*\b(spara|save|lagra)\b/i.test(text);
+      new RegExp(`\\b${saveVerb}\\b[\\s\\S]*\\b(?:och|and|also)\\b[\\s\\S]*\\b${retrieveVerb}\\b`, "i").test(text) ||
+      new RegExp(`\\b${retrieveVerb}\\b[\\s\\S]*\\b(?:och|and|also)\\b[\\s\\S]*\\b${saveVerb}\\b`, "i").test(text);
 
     if (isMixed) {
       label = "mixed";
       confidence = 0.82;
       rationale = "Save-and-retrieve in one message.";
     } else if (
-      /\b(hur (gör|fungerar|använder|byter|ändrar)|hjälp|vad kan du|vilka kommandon|inställning(ar)?|how (do|can) i|what can you|help|settings?|configure)\b/i.test(
+      /\b(hur (gör|fungerar|använder|byter|ändrar|raderar)|hjälp|hjälpa|vad kan du|vilka kommandon|inställning(ar)?|skillnaden mellan|hur fungerar sökningen|how (do|can) i|what can you|help|help me|settings?|configure|delete a note|difference between)\b/i.test(
         text,
       )
     ) {
@@ -108,7 +108,7 @@ class ScriptedClassifierLLM implements LLMService {
       confidence = 0.88;
       rationale = "Question about the app itself.";
     } else if (
-      /\b(spara|save|lagra|anteckna|notera|skriv ner|arkivera|lägg till|skapa.*anteckning|create.*note|store|capture)\b/i.test(
+      /\b(spara|save|lagra|anteckna|notera|skriv ner|arkivera|lägg\s+(till|in)|skapa.*anteckning|create.*note|store|capture)\b/i.test(
         text,
       )
     ) {
