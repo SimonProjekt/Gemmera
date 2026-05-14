@@ -45,6 +45,7 @@ export class GemmeraChatView extends ItemView {
   private escCleared = false;
   private prefersReducedMotion = false;
   private lastTurnId: string | undefined;
+  private historyDrawerEl: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -139,12 +140,18 @@ export class GemmeraChatView extends ItemView {
     });
 
     this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
+    this.historyDrawerEl = this.contextPanelEl;
 
     const adapter = this.app.vault.adapter as FileSystemAdapter;
     const historyPath = adapter.getFullPath(".coworkmd/chats.json");
-    this.chatHistory = new ChatHistoryStore(historyPath);
+    this.chatHistory = new ChatHistoryStore(historyPath, this.retentionPolicy());
     // Sessions are created lazily on the first persisted turn so opening the
     // panel without sending anything doesn't accumulate empty rows in chats.json.
+
+    // Prune stale sessions on open, then render the drawer.
+    this.chatHistory.pruneIfNeeded().catch(() => {}).finally(() => {
+      this.renderHistoryDrawer().catch(() => {});
+    });
   }
 
   async onClose(): Promise<void> {
@@ -529,6 +536,7 @@ export class GemmeraChatView extends ItemView {
           const sid = this.currentSessionId;
           await ch.appendTurn(sid, { role: "user", content: text, timestamp: userTs });
           await ch.appendTurn(sid, { role: "assistant", content: reply.content, timestamp: Date.now() });
+          await this.renderHistoryDrawer();
         })().catch(() => {});
       }
 
@@ -552,6 +560,75 @@ export class GemmeraChatView extends ItemView {
       this.setInputDisabled(false);
       this.inputEl.focus();
     }
+  }
+
+  // ── Chat history drawer (#70) ─────────────────────────────────────────
+
+  private retentionPolicy(): { maxDays?: number; maxSessions?: number } {
+    return {};
+  }
+
+  private async renderHistoryDrawer(): Promise<void> {
+    const el = this.historyDrawerEl;
+    if (!el || !this.chatHistory) return;
+
+    el.empty();
+
+    const headEl = el.createEl("div", { cls: "gemmera-history__head" });
+    headEl.createEl("span", { cls: "gemmera-history__title", text: "Chats" });
+
+    const newBtn = headEl.createEl("button", {
+      cls: "gemmera-history__new-btn",
+      text: "+ Ny chatt",
+      attr: { "aria-label": "Start a new chat" },
+    });
+    newBtn.addEventListener("click", () => this.startNewSession());
+
+    const sessions = await this.chatHistory.listSessions();
+    if (sessions.length === 0) {
+      el.createEl("p", { cls: "gemmera-history__empty", text: "Inga sparade chattar." });
+      return;
+    }
+
+    const listEl = el.createEl("ul", { cls: "gemmera-history__list" });
+    for (const session of sessions) {
+      const isActive = session.id === this.currentSessionId;
+      const item = listEl.createEl("li", {
+        cls: `gemmera-history__item${isActive ? " gemmera-history__item--active" : ""}`,
+        attr: { tabindex: "0", role: "button", "aria-pressed": String(isActive) },
+      });
+      item.createEl("span", { cls: "gemmera-history__item-title", text: session.title });
+      const meta = formatSessionMeta(session.updatedAt, session.turns.length);
+      item.createEl("span", { cls: "gemmera-history__item-meta", text: meta });
+
+      item.addEventListener("click", () => this.switchToSession(session).catch(() => {}));
+      item.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          this.switchToSession(session).catch(() => {});
+        }
+      });
+    }
+  }
+
+  private startNewSession(): void {
+    this.history = [];
+    this.currentSessionId = null;
+    this.messagesEl.empty();
+    this.renderHistoryDrawer().catch(() => {});
+  }
+
+  private async switchToSession(
+    session: import("./services/chat-history").ChatSession,
+  ): Promise<void> {
+    this.currentSessionId = session.id;
+    this.history = session.turns.map((t) => ({ role: t.role, content: t.content }));
+    this.messagesEl.empty();
+    for (const turn of session.turns) {
+      this.appendMessage(turn.role, turn.content);
+    }
+    await this.renderHistoryDrawer();
+    this.inputEl.focus();
   }
 
   // ── Disambiguation chip DOM ──────────────────────────────────────────
@@ -824,6 +901,15 @@ export function withContext(
     { role: "assistant", content: "Förstått, jag har läst anteckningarna." },
     ...history,
   ];
+}
+
+function formatSessionMeta(updatedAt: number, turnCount: number): string {
+  const turns = Math.floor(turnCount / 2);
+  const date = new Date(updatedAt).toLocaleDateString("sv-SE", {
+    month: "short",
+    day: "numeric",
+  });
+  return `${date} · ${turns} meddelande${turns === 1 ? "" : "n"}`;
 }
 
 /** Extract unique [[wikilink]] paths from markdown text. */
