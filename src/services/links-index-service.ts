@@ -61,6 +61,10 @@ export class LinksIndexService {
     return this.inFlight;
   }
 
+  neighborCount(path: string): number {
+    return this.index.neighborCount(path);
+  }
+
   private schedule(event: RunnerEvent): void {
     const next = this.inFlight.then(() => this.process(event));
     this.inFlight = next.catch(() => undefined);

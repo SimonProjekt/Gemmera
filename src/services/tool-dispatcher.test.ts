@@ -1,13 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { MockVaultService } from "../contracts/mocks/mock-vault";
-import { dispatchToolCall, buildFrontmatter, type ToolDispatchDeps } from "./tool-dispatcher";
+import { dispatchToolCall, buildFrontmatter, appendUnderDatedSection, patchFrontmatter, type ToolDispatchDeps } from "./tool-dispatcher";
+import { InMemoryJobQueue } from "./in-memory-job-queue";
+import { IngestWriter } from "./ingest-writer";
 
 function makeDeps(overrides: Partial<ToolDispatchDeps> = {}): ToolDispatchDeps {
   const vault = new MockVaultService();
   return {
     vault,
+    ingestWriter: new IngestWriter(vault),
+    jobQueue: new InMemoryJobQueue(),
+    index: { search: vi.fn().mockResolvedValue([]) },
+    linksIndex: { neighborCount: vi.fn().mockReturnValue(0) },
     inboxFolder: "Inbox/",
+    chatModel: "gemma",
     openNotePreview: vi.fn().mockResolvedValue(null),
+    confirmDelete: vi.fn().mockResolvedValue("cancelled"),
+    confirmRename: vi.fn().mockResolvedValue("cancelled"),
     appendSystemMessage: vi.fn(),
     ...overrides,
   };
@@ -27,13 +36,15 @@ describe("dispatchToolCall — routing", () => {
     expect(await deps.vault.exists("Inbox/Dogs.md")).toBe(true);
   });
 
-  it("returns unknown_tool for save_note with mode=append (not yet handled)", async () => {
-    const deps = makeDeps();
+  it("appends save_note with mode=append under today's heading", async () => {
+    const vault = new MockVaultService({ "Inbox/Dogs.md": "Existing" });
+    const deps = makeDeps({ vault });
     const result = await dispatchToolCall(
-      { id: "2", name: "save_note", arguments: { mode: "append" } },
+      { id: "2", name: "save_note", arguments: { mode: "append", path: "Inbox/Dogs.md", body_markdown: "New entry" } },
       deps,
     );
-    expect(result.kind).toBe("unknown_tool");
+    expect(result.kind).toBe("done");
+    expect(await vault.read("Inbox/Dogs.md")).toContain("New entry");
   });
 
   it("returns unknown_tool for unrecognised tool names", async () => {
@@ -59,6 +70,30 @@ describe("dispatchToolCall — routing", () => {
 
     expect(result.kind).toBe("cancelled");
     expect(appendSystemMessage).toHaveBeenCalledWith("Save cancelled.");
+  });
+});
+
+describe("appendUnderDatedSection", () => {
+  it("adds today's heading when the note lacks one", () => {
+    const updated = appendUnderDatedSection("Existing", "New entry", new Date("2026-05-14T12:00:00Z"));
+    expect(updated).toBe("Existing\n\n## 2026-05-14\n\nNew entry");
+  });
+
+  it("does not duplicate today's heading", () => {
+    const updated = appendUnderDatedSection("Existing\n\n## 2026-05-14\n\nFirst", "Second", new Date("2026-05-14T12:00:00Z"));
+    expect(updated).toBe("Existing\n\n## 2026-05-14\n\nFirst\n\nSecond");
+  });
+});
+
+describe("patchFrontmatter", () => {
+  it("escapes regex metacharacters in frontmatter keys", () => {
+    const updated = patchFrontmatter("---\nfoo.bar: old\nfooXbar: keep\n---\nBody", { "foo.bar": "new" });
+    expect(updated).toContain('foo.bar: "new"');
+    expect(updated).toContain("fooXbar: keep");
+  });
+
+  it("returns null for unclosed frontmatter", () => {
+    expect(patchFrontmatter("---\ntitle: Broken\nBody", { title: "New" })).toBeNull();
   });
 });
 

@@ -11,11 +11,13 @@ import { runIngest } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
 import { createSynthesisNote } from "./services/synthesis-writer";
-import { dispatchToolCall, SAVE_NOTE_TOOL, type ToolDispatchDeps } from "./services/tool-dispatcher";
+import { dispatchToolCall, WRITE_TOOLS, type ToolDispatchDeps } from "./services/tool-dispatcher";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
 import { openNotePreview } from "./ui/note-preview-modal";
+import { openDeleteConfirm } from "./ui/delete-confirm-modal";
+import { openRenamePreview } from "./ui/rename-preview-modal";
 import { buildMessageDecoration } from "./message-decoration";
 import { showSaveUndoNotice } from "./notices";
 import { labelForState } from "./services/turn-status";
@@ -473,7 +475,7 @@ export class GemmeraChatView extends ItemView {
       const reply = await this.services.llm.chat({
         model: this.settings.chatModel,
         messages,
-        tools: [SAVE_NOTE_TOOL],
+        tools: [...WRITE_TOOLS],
         onToken: (token) => {
           textEl.textContent += token;
           this.scrollToBottom();
@@ -481,13 +483,23 @@ export class GemmeraChatView extends ItemView {
       });
       this.history.push({ role: "assistant", content: reply.content });
 
-      // Dispatch structured tool calls emitted by the LLM (#53).
+      // Dispatch structured tool calls emitted by the LLM (#53, #62).
       if (reply.toolCalls && reply.toolCalls.length > 0) {
         const dispatchDeps: ToolDispatchDeps = {
           vault: this.services.vault,
+          ingestWriter: this.services.ingestWriter,
+          jobQueue: this.services.jobQueue,
+          index: this.services.index,
+          linksIndex: this.services.linksIndexService,
           inboxFolder: this.settings.inboxFolder,
-          openNotePreview: (opts) => openNotePreview(this.app, opts),
-          appendSystemMessage: (msg) => this.appendMessage("assistant", msg),
+          chatModel: this.settings.chatModel,
+          openNotePreview: (opts: Parameters<typeof openNotePreview>[1]) =>
+            openNotePreview(this.app, opts),
+          confirmDelete: (path: string, preview: string) =>
+            openDeleteConfirm(this.app, path, preview),
+          confirmRename: (from: string, to: string, linkCount: number) =>
+            openRenamePreview(this.app, from, to, linkCount),
+          appendSystemMessage: (msg: string) => this.appendMessage("assistant", msg),
         };
         for (const call of reply.toolCalls) {
           try {
