@@ -22,6 +22,15 @@ class StubRetriever implements Retriever {
   }
 }
 
+class SpyRetriever implements Retriever {
+  readonly calls: Array<{ query: string; topK: number | undefined }> = [];
+  constructor(private readonly hits: RetrievalHit[] = []) {}
+  async retrieve(query: string, opts?: { topK?: number }): Promise<RetrievalHit[]> {
+    this.calls.push({ query, topK: opts?.topK });
+    return this.hits;
+  }
+}
+
 class SequenceLLM implements LLMService {
   private calls = 0;
   constructor(private readonly replies: string[]) {}
@@ -239,6 +248,27 @@ describe("runQuery", () => {
     const states = events.filter((e) => e.kind === "enter").map((e) => e.state);
     expect(states).toContain("RETRY_WITH_CONSTRAINED_CITATIONS");
     expect(states[states.length - 1]).toBe("VALIDATION_FAILED");
+  });
+
+  // Invariant for #14: vault-tagged turns must never bypass retrieval. The
+  // event-log assertion alone could pass if an orchestrator logged the state
+  // without calling the retriever, so this spy guards against that drift.
+  it("retrieval invariant: retriever.retrieve is called with the user query", async () => {
+    const spy = new SpyRetriever([makeHit("Notes/a.md", "x")]);
+    const eventLog = new InMemoryEventLog();
+    const deps: QueryOrchestratorDeps = {
+      retriever: spy,
+      assembler: new StubAssembler([makeChunk("Notes/a.md")]),
+      llm: new SequenceLLM([validReply("A.", ["Notes/a.md"])]),
+      eventLog,
+      turnId: "turn-1",
+      model: "test-model",
+    };
+    await runQuery({ query: "What is X?" }, deps);
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0]?.query).toBe("What is X?");
+    const events = await eventLog.eventsFor("turn-1");
+    expect(events.some((e) => e.kind === "enter" && e.state === "RETRIEVE")).toBe(true);
   });
 
   it("empty retrieval event log goes PLAN_RETRIEVAL → RETRIEVE → PRESENT → DONE", async () => {
