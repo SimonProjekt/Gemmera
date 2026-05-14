@@ -164,6 +164,34 @@
   align-self: flex-end;
 }
 
+/* Send button doubles as Stop during streaming (#46). */
+.gemmera-send--stop {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+/* Cancelled-turn marker (#46). Distinct from error styling — this was a
+ * user-initiated stop, not a failure, so it's muted rather than red. */
+.gemmera-message--cancelled .gemmera-message__text {
+  opacity: 0.7;
+  border-left: 2px solid var(--text-muted);
+  padding-left: 8px;
+  font-style: italic;
+}
+
+.gemmera-message__cancelled {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .gemmera-status-chip {
   font-size: 0.75rem;
   padding: 4px 10px;

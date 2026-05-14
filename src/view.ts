@@ -10,6 +10,7 @@ import { toDisambiguationRow } from "./services/classifier-events";
 import { runIngest } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
+import { isAbortError, StreamingState } from "./services/streaming-state";
 import { createSynthesisNote } from "./services/synthesis-writer";
 import { dispatchToolCall, ALL_TOOLS, type ToolDispatchDeps } from "./services/tool-dispatcher";
 import { DisambiguationChip } from "./disambiguation-chip";
@@ -45,6 +46,10 @@ export class GemmeraChatView extends ItemView {
   private escCleared = false;
   private prefersReducedMotion = false;
   private lastTurnId: string | undefined;
+  private streaming = new StreamingState();
+  private inFlightText: string | null = null;
+  private readonly sendLabel = "Skicka";
+  private readonly stopLabel = "Stoppa";
   private historyDrawerEl: HTMLElement | null = null;
 
   constructor(
@@ -117,10 +122,15 @@ export class GemmeraChatView extends ItemView {
     });
     this.sendBtn = this.inputAreaEl.createEl("button", {
       cls: "gemmera-send",
-      text: "Skicka",
+      text: this.sendLabel,
       attr: { "aria-label": "Send message" },
     });
-    this.sendBtn.addEventListener("click", () => this.handleSend());
+    // Single handler: dispatch to send when idle, abort when streaming.
+    // Keeps the button always-enabled during a turn so Stop is reachable.
+    this.sendBtn.addEventListener("click", () => {
+      if (this.streaming.isStreaming()) this.cancelStreaming(this.inFlightText ?? undefined);
+      else void this.handleSend();
+    });
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         if (this.inputEl.value.trim().length > 0 && !this.escCleared) {
@@ -188,6 +198,9 @@ export class GemmeraChatView extends ItemView {
 
     const turnId = crypto.randomUUID();
     this.lastTurnId = turnId;
+    // Track the in-flight text so the Stop button can refill the composer
+    // for an edit-and-retry that lands as a brand new turn.
+    this.inFlightText = text;
 
     // ── Classify ──────────────────────────────────────────────────────
     let route: RouteDecision | null = null;
@@ -233,7 +246,13 @@ export class GemmeraChatView extends ItemView {
 
     // ── Mixed (#47) ───────────────────────────────────────────────────
     if (intent === "mixed") {
-      await this.runMixed(text, turnId);
+      const signal = this.setStreaming(true);
+      try {
+        await this.runMixed(text, turnId, signal);
+      } finally {
+        this.setStreaming(false);
+        this.inFlightText = null;
+      }
       this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "mixed" }];
       this.setInputDisabled(false);
       this.inputEl.focus();
@@ -242,7 +261,13 @@ export class GemmeraChatView extends ItemView {
 
     // ── Ask (#14) — vault-grounded query through the RAG tool loop ────
     if (intent === "ask") {
-      await this.runAsk(text, turnId, route ?? null);
+      const signal = this.setStreaming(true);
+      try {
+        await this.runAsk(text, turnId, route ?? null, signal);
+      } finally {
+        this.setStreaming(false);
+        this.inFlightText = null;
+      }
       this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "ask" }];
       this.setInputDisabled(false);
       this.inputEl.focus();
@@ -250,7 +275,13 @@ export class GemmeraChatView extends ItemView {
     }
 
     // ── Chat (meta / fallback, no retrieval) ──────────────────────────
-    await this.runChat(text, intent, turnId, route ?? null);
+    const signal = this.setStreaming(true);
+    try {
+      await this.runChat(text, intent, turnId, route ?? null, signal);
+    } finally {
+      this.setStreaming(false);
+      this.inFlightText = null;
+    }
   }
 
   private async runCapture(text: string, turnId: string): Promise<void> {
@@ -308,7 +339,7 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
-  private async runMixed(text: string, turnId: string): Promise<void> {
+  private async runMixed(text: string, turnId: string, signal?: AbortSignal): Promise<void> {
     this.appendMessage("user", text);
 
     const ingestStatusEl = this.messagesEl.createEl("div", {
@@ -339,6 +370,8 @@ export class GemmeraChatView extends ItemView {
         inboxFolder: this.settings.inboxFolder,
         dedupThreshold: this.settings.dedupThreshold,
         alwaysPreview: this.settings.alwaysPreviewBeforeSave,
+        ingestSignal: signal,
+        querySignal: signal,
         onStateChange: (state, label, phase) => {
           if (phase === "ingest") {
             ingestStatusEl.textContent = label;
@@ -375,6 +408,11 @@ export class GemmeraChatView extends ItemView {
     } catch (err) {
       ingestStatusEl.remove();
       queryStatusEl.remove();
+      if (isAbortError(err)) {
+        const suffix = savedPathSoFar ? ` Note was saved to **${savedPathSoFar}**.` : "";
+        this.appendCancelledMessage(`Stopped.${suffix}`);
+        return;
+      }
       if (savedPathSoFar) {
         this.appendMessage("assistant", `Note was saved to **${savedPathSoFar}**, but the query failed unexpectedly.`);
       }
@@ -390,6 +428,7 @@ export class GemmeraChatView extends ItemView {
     text: string,
     turnId: string,
     route: RouteDecision | null = null,
+    signal?: AbortSignal,
   ): Promise<void> {
     const decoration = buildMessageDecoration(
       route,
@@ -413,6 +452,7 @@ export class GemmeraChatView extends ItemView {
           eventLog: this.services.eventLog,
           turnId,
           model: this.settings.chatModel,
+          signal,
           onStateChange: (_state, label) => {
             statusEl.textContent = label;
           },
@@ -444,6 +484,10 @@ export class GemmeraChatView extends ItemView {
       }
     } catch (err) {
       statusEl.remove();
+      if (isAbortError(err)) {
+        this.appendCancelledMessage("Stopped.");
+        return;
+      }
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     }
   }
@@ -453,6 +497,7 @@ export class GemmeraChatView extends ItemView {
     intent: IntentLabel,
     turnId: string,
     route: RouteDecision | null = null,
+    signal?: AbortSignal,
   ): Promise<void> {
     const decoration = buildMessageDecoration(
       route,
@@ -483,6 +528,7 @@ export class GemmeraChatView extends ItemView {
         model: this.settings.chatModel,
         messages,
         tools: [...ALL_TOOLS],
+        signal,
         onToken: (token) => {
           textEl.textContent += token;
           this.scrollToBottom();
@@ -552,9 +598,19 @@ export class GemmeraChatView extends ItemView {
         this.renderCitationChips(assistantEl, citations);
       }
     } catch (err) {
-      assistantEl.remove();
-      this.history.pop();
-      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+      if (isAbortError(err)) {
+        // Preserve any partial tokens already rendered into textEl and mark
+        // the turn as cancelled. No assistant entry was pushed to history
+        // yet — that only happens after `services.llm.chat` resolves — so
+        // there's nothing to pop here. The user message stays so the next
+        // turn keeps the right context, which is what we want for an
+        // edit-and-retry that references the cancelled question.
+        this.markMessageCancelled(assistantEl, textEl);
+      } else {
+        assistantEl.remove();
+        this.history.pop();
+        this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+      }
     } finally {
       silentSaveEl?.remove();
       this.setInputDisabled(false);
@@ -795,11 +851,89 @@ export class GemmeraChatView extends ItemView {
     this.sendBtn.disabled = disabled;
   }
 
+  /**
+   * Toggle the composer between idle (Send) and streaming (Stop). The Send
+   * button stays enabled while streaming so the user can interrupt; only the
+   * textarea is disabled so they can't queue a second turn.
+   *
+   * Overloaded so callers never need to non-null-assert the return value:
+   * `setStreaming(true)` is statically typed to return `AbortSignal`,
+   * `setStreaming(false)` returns `void`.
+   *
+   * KNOWN GAP: Stop is unreachable while the classifier-orchestrator is
+   * deciding the intent (handleSend awaits classifyTurn before the
+   * setStreaming(true) call below). Classify is a single small LLM call so
+   * this is acceptable in practice; threading the signal into
+   * classifier-orchestrator is a follow-up (touches its public API and
+   * tests across the classifier stack).
+   */
+  private setStreaming(active: true): AbortSignal;
+  private setStreaming(active: false): void;
+  private setStreaming(active: boolean): AbortSignal | void {
+    if (active) {
+      const s = this.streaming.begin();
+      this.inputEl.disabled = true;
+      this.sendBtn.disabled = false;
+      this.sendBtn.setText(this.stopLabel);
+      this.sendBtn.setAttribute("aria-label", "Stop generation");
+      this.sendBtn.addClass("gemmera-send--stop");
+      return s;
+    }
+    this.streaming.end();
+    this.inputEl.disabled = false;
+    this.sendBtn.disabled = false;
+    this.sendBtn.setText(this.sendLabel);
+    this.sendBtn.setAttribute("aria-label", "Send message");
+    this.sendBtn.removeClass("gemmera-send--stop");
+  }
+
+  /**
+   * Refill the composer with the in-flight user text so the user can edit and
+   * resend as a *new* turn (each Send creates a fresh turnId / userTs, so the
+   * cancelled turn is preserved in history alongside the retry).
+   */
+  private cancelStreaming(restoreText?: string): void {
+    if (!this.streaming.cancel()) return;
+    if (restoreText) {
+      this.inputEl.value = restoreText;
+    }
+    this.setStreaming(false);
+    this.inputEl.focus();
+  }
+
   private scrollToBottom(): void {
     this.messagesEl.scrollTo({
       top: this.messagesEl.scrollHeight,
       behavior: this.prefersReducedMotion ? "auto" : "smooth",
     });
+  }
+
+  /**
+   * Mark a streaming assistant message as cancelled. Preserves any partial
+   * tokens already appended to `textEl` and adds a small "[cancelled]" tag so
+   * the user can tell the turn didn't finish on its own.
+   */
+  private markMessageCancelled(el: HTMLElement, textEl: HTMLElement): void {
+    el.addClass("gemmera-message--cancelled");
+    if (!textEl.textContent || textEl.textContent.trim().length === 0) {
+      textEl.textContent = "(no output)";
+    }
+    const tag = el.createEl("span", { cls: "gemmera-message__cancelled", text: "stopped" });
+    tag.setAttribute("aria-label", "Turn cancelled");
+  }
+
+  /**
+   * Append a fresh "stopped" message for paths that hadn't started streaming
+   * yet (runAsk / runMixed during the retrieval phase).
+   */
+  private appendCancelledMessage(text: string): void {
+    const el = this.messagesEl.createEl("div", {
+      cls: "gemmera-message gemmera-message--assistant gemmera-message--cancelled",
+    });
+    el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+    el.createEl("p", { cls: "gemmera-message__text", text });
+    el.createEl("span", { cls: "gemmera-message__cancelled", text: "stopped" });
+    this.scrollToBottom();
   }
 
   private appendStreamingMessage(): { el: HTMLElement; textEl: HTMLElement } {
