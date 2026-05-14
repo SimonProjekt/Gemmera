@@ -42,6 +42,18 @@ export default class GemmeraPlugin extends Plugin {
     // process jobs the user expected to stay paused.
     await this.services.runnerControls.applyPersistedState();
     this.services.eventBridge.start();
+    // Reload .coworkignore rules whenever the file is saved, so the user does
+    // not need to restart Obsidian after editing it.
+    this.registerEvent(
+      this.app.vault.on("modify", async (file) => {
+        if (file.path === ".coworkignore") {
+          try {
+            const content = await this.app.vault.adapter.read(".coworkignore");
+            this.services.coworkIgnore.reload(content);
+          } catch { /* file removed; keep current rules */ }
+        }
+      }),
+    );
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();
     this.services.bm25IndexService.start();

@@ -24,6 +24,7 @@ import { ObsidianVaultService } from "./real-vault";
 import { VaultLinearIndexService } from "./vault-index";
 import { InMemoryJobQueue } from "./in-memory-job-queue";
 import { DefaultPathFilter } from "./path-filter";
+import { CoworkIgnore, DEFAULT_COWORKIGNORE } from "./cowork-ignore";
 import { ObsidianVaultEventSource } from "./obsidian-vault-events";
 import { VaultEventBridge } from "./vault-event-bridge";
 import { JsonIngestionStore } from "./json-ingestion-store";
@@ -50,6 +51,7 @@ import type { EventLog } from "../contracts";
 export interface Services {
   llm: LLMService;
   vault: VaultService;
+  coworkIgnore: CoworkIgnore;
   index: IndexService;
   jobQueue: JobQueue;
   pathFilter: PathFilter;
@@ -93,15 +95,11 @@ export async function createLLMService(
   return ollama;
 }
 
+const COWORKIGNORE_PATH = ".coworkignore";
+
 export async function createServices(app: App, settings: GemmeraSettings, pluginDir: string): Promise<Services> {
   const vault = new ObsidianVaultService(app);
   const jobQueue = new InMemoryJobQueue();
-  const pathFilter = new DefaultPathFilter();
-  const eventBridge = new VaultEventBridge(
-    new ObsidianVaultEventSource(app),
-    jobQueue,
-    pathFilter,
-  );
 
   const adapter = app.vault.adapter;
   if (!(adapter instanceof FileSystemAdapter)) {
@@ -109,6 +107,23 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
       "Gemmera requires a filesystem-backed vault (desktop Obsidian).",
     );
   }
+
+  // Load (or create) .coworkignore, then build the path filter around it.
+  let ignoreContent: string;
+  try {
+    ignoreContent = await adapter.read(COWORKIGNORE_PATH);
+  } catch {
+    ignoreContent = DEFAULT_COWORKIGNORE;
+    try { await adapter.write(COWORKIGNORE_PATH, DEFAULT_COWORKIGNORE); } catch { /* read-only vault */ }
+  }
+  const coworkIgnore = new CoworkIgnore(ignoreContent);
+  const pathFilter = new DefaultPathFilter(coworkIgnore);
+
+  const eventBridge = new VaultEventBridge(
+    new ObsidianVaultEventSource(app),
+    jobQueue,
+    pathFilter,
+  );
   const ingestionStore = new JsonIngestionStore(adapter.getFullPath(STATE_PATH));
   // Closure cell so the synchronous epoch source the pipeline reads can be
   // refreshed after async rebuilds. RunnerControls calls `onRebuild` once
@@ -174,6 +189,7 @@ export async function createServices(app: App, settings: GemmeraSettings, plugin
   return {
     llm: await createLLMService(settings.llmBackend),
     vault,
+    coworkIgnore,
     index: new VaultLinearIndexService(vault),
     jobQueue,
     pathFilter,
@@ -225,6 +241,7 @@ export { ScheduledReconciler } from "./scheduled-reconciler";
 export { IngestWriter } from "./ingest-writer";
 export { runIngest } from "./ingest-orchestrator";
 export { createSynthesisNote, buildSynthesisSpec } from "./synthesis-writer";
+export { CoworkIgnore, DEFAULT_COWORKIGNORE } from "./cowork-ignore";
 export type {
   IngestPreview,
   PreviewDecision,
