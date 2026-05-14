@@ -1,0 +1,322 @@
+import type {
+  DedupChoice,
+  EventLog,
+  EventLogEntry,
+  IngestInput,
+  IngestOutcome,
+  IngestStrategy,
+  IngestionStore,
+  JobQueue,
+  LLMService,
+  NoteSpec,
+  PromptLoader,
+  Retriever,
+  VaultService,
+} from "../contracts";
+import { parseContent } from "./ingest-parser";
+import { decideStrategy } from "./ingest-strategy";
+import { IngestWriter } from "./ingest-writer";
+import { RetryBudget } from "./retry-policy";
+import type { TurnStatusCallback } from "./turn-status";
+import { labelForState } from "./turn-status";
+import { unique } from "./util";
+
+const STATES = {
+  parse: "PARSE_CONTENT",
+  search: "SEARCH_SIMILAR",
+  decide: "DECIDE_STRATEGY",
+  preview: "PREVIEW",
+  write: "WRITE",
+  updateIndex: "UPDATE_INDEX",
+  done: "DONE",
+  cancelled: "CANCELLED",
+  failed: "TOOL_FAILED",
+} as const;
+
+export interface IngestPreview {
+  /** Drives which buttons the preview shows. */
+  kind: "save" | "append" | "dedup" | "split";
+  spec: NoteSpec;
+  strategy: IngestStrategy;
+  /** Only set when kind === "split". All split candidates. */
+  candidates?: NoteSpec[];
+}
+
+export type PreviewDecision =
+  | { action: "confirm" }
+  | { action: "edit"; spec: NoteSpec }
+  | { action: "cancel" }
+  | { action: "dedup_choice"; choice: DedupChoice }
+  | { action: "split_confirm"; confirmed: NoteSpec[] };
+
+export type PreviewHandler = (
+  preview: IngestPreview,
+) => Promise<PreviewDecision>;
+
+export interface IngestOrchestratorDeps {
+  llm: LLMService;
+  promptLoader: PromptLoader;
+  retriever: Retriever;
+  store: IngestionStore;
+  vault: VaultService;
+  writer: IngestWriter;
+  jobQueue: JobQueue;
+  /** Returns `confirm` immediately for the bypass path used in tests. */
+  preview: PreviewHandler;
+  /**
+   * Optional event log. The orchestrator writes one `enter` row per
+   * orchestrator state (parse → search → decide → preview → write →
+   * update_index → done/cancelled/failed) so the turn inspector and the
+   * #13 acceptance test can replay what happened.
+   */
+  eventLog?: EventLog;
+  /** Turn id used for event-log entries. Defaults to a fresh uuid. */
+  turnId?: string;
+  /** Called synchronously on each state entry so the UI can update its status chip. */
+  onStateChange?: TurnStatusCallback;
+  inboxFolder?: string;
+  dedupThreshold?: number;
+  alwaysPreview?: boolean;
+  model?: string;
+  version?: string;
+  runId?: () => string;
+  signal?: AbortSignal;
+  /** Shared retry budget for model-output retries across this turn. */
+  retryBudget?: RetryBudget;
+}
+
+/**
+ * Drives the ingest tool loop (#13): parse → search_similar → decide →
+ * preview → write → update_index.
+ *
+ * The preview gate is an injected callback so the orchestrator stays
+ * UI-agnostic; tests pass a function that auto-confirms or simulates a
+ * cancel. The chat view passes a callback that opens an Obsidian Modal.
+ *
+ * The preview is the only state allowed to bounce back to itself: the user
+ * can edit the candidate and re-render before confirming. A hard cap of 10
+ * iterations prevents pathological loops from a misbehaving handler.
+ */
+export async function runIngest(
+  input: IngestInput,
+  deps: IngestOrchestratorDeps,
+): Promise<IngestOutcome> {
+  const turnId = deps.turnId ?? freshTurnId();
+  // Classification happens upstream (classifier-orchestrator); ingest picks up
+  // from the state the classifier left on exit.
+  let prevState = "CLASSIFY_INTENT";
+  const enter = async (state: string, payload?: Record<string, unknown>) => {
+    deps.onStateChange?.(state, labelForState(state));
+    if (!deps.eventLog) return;
+    const entry: EventLogEntry = {
+      turnId,
+      kind: "enter",
+      state,
+      fromState: prevState,
+      timestamp: Date.now(),
+      triggeringEvent: payload
+        ? { kind: "tool_result", name: state, payload }
+        : null,
+    };
+    await deps.eventLog.write(entry);
+    prevState = state;
+  };
+
+  // ── PARSE_CONTENT ────────────────────────────────────────────────────
+  await enter(STATES.parse);
+  const budget = deps.retryBudget ?? new RetryBudget();
+  const parse = await parseContent(input.text, input.instruction, {
+    llm: deps.llm,
+    promptLoader: deps.promptLoader,
+    runId: deps.runId,
+    model: deps.model,
+    version: deps.version,
+  }, deps.signal, budget);
+  if (!parse.ok) {
+    if (parse.reason === "empty") {
+      await enter(STATES.cancelled, { reason: "empty_input" });
+      return { kind: "cancelled" };
+    }
+    await enter(STATES.failed, { reason: `parse:${parse.reason}` });
+    return { kind: "failed", reason: `parse:${parse.reason}` };
+  }
+  let spec = parse.spec;
+
+  // ── SEARCH_SIMILAR + DECIDE_STRATEGY ─────────────────────────────────
+  await enter(STATES.search);
+  const decision = await decideStrategy(spec, {
+    llm: deps.llm,
+    promptLoader: deps.promptLoader,
+    retriever: deps.retriever,
+    store: deps.store,
+    dedupThreshold: deps.dedupThreshold,
+  }, deps.signal);
+  let strategy = decision.strategy;
+  await enter(STATES.decide, { kind: strategy.kind });
+
+  // For append/dedup_ask, capture the target's mtime now so the writer can
+  // detect drift between preview and write. If the user edited the target
+  // during preview, we abort rather than silently clobber.
+  let expectedMtime: number | undefined;
+  if (strategy.kind === "append" || strategy.kind === "dedup_ask") {
+    try {
+      expectedMtime = (await deps.vault.stat(strategy.target)).mtime;
+    } catch {
+      expectedMtime = undefined;
+    }
+  }
+
+  // ── PREVIEW ──────────────────────────────────────────────────────────
+  // Bypass when the user has opted out of always-preview AND the case is
+  // unambiguous: a plain create with high confidence. Append, dedup_ask,
+  // and split always preview — they touch existing notes or write multiple.
+  const skipPreview =
+    deps.alwaysPreview === false &&
+    strategy.kind === "create" &&
+    spec.cowork.confidence === "high";
+
+  // ── SPLIT PREVIEW ─────────────────────────────────────────────────────
+  if (strategy.kind === "split") {
+    await enter(STATES.preview, { kind: "split", count: strategy.candidates.length });
+    const result = await deps.preview({
+      kind: "split",
+      spec: strategy.candidates[0] ?? spec,
+      strategy,
+      candidates: strategy.candidates,
+    });
+    if (result.action === "cancel") {
+      await enter(STATES.cancelled, { from: "split_preview" });
+      return { kind: "cancelled" };
+    }
+    if (result.action !== "split_confirm") {
+      await enter(STATES.failed, { reason: "invalid_split_action" });
+      return { kind: "failed", reason: "invalid_split_action" };
+    }
+    const confirmed = result.confirmed;
+
+    // ── WRITE (split) ──────────────────────────────────────────────────
+    await enter(STATES.write, { kind: "split", count: confirmed.length });
+    const paths: string[] = [];
+    const specs: NoteSpec[] = [];
+    for (const candidate of confirmed) {
+      try {
+        const written = await deps.writer.writeNew(candidate, { folder: deps.inboxFolder });
+        paths.push(written.path);
+        specs.push(candidate);
+        deps.jobQueue.enqueue({ kind: "index", path: written.path });
+      } catch (err) {
+        const reason = `write:${stringifyError(err)}`;
+        await enter(STATES.failed, { reason });
+        return { kind: "failed", reason };
+      }
+    }
+    await enter(STATES.updateIndex, { paths });
+    await enter(STATES.done, { mode: "split", count: paths.length });
+    return { kind: "split_saved", paths, specs };
+  }
+
+  if (!skipPreview) {
+    await enter(STATES.preview, { kind: previewKindFor(strategy) });
+    for (let i = 0; i < 10; i++) {
+      const previewKind = previewKindFor(strategy);
+      const result = await deps.preview({ kind: previewKind, spec, strategy });
+      if (result.action === "cancel") {
+        await enter(STATES.cancelled, { from: "preview" });
+        return { kind: "cancelled" };
+      }
+      if (result.action === "edit") {
+        spec = result.spec;
+        continue;
+      }
+      if (result.action === "dedup_choice") {
+        if (result.choice === "cancel") {
+          await enter(STATES.cancelled, { from: "dedup" });
+          return { kind: "cancelled" };
+        }
+        if (strategy.kind !== "dedup_ask") {
+          await enter(STATES.failed, { reason: "dedup_choice_without_dedup_ask" });
+          return { kind: "failed", reason: "dedup_choice_without_dedup_ask" };
+        }
+        if (result.choice === "append") {
+          strategy = { kind: "append", target: strategy.target };
+        } else {
+          // save_anyway — fall through to a regular create. Surface the
+          // matched note as a related link so the user sees the connection.
+          strategy = {
+            kind: "create",
+            related: unique([...spec.related, strategy.target]),
+          };
+        }
+        // The user has resolved the dedup; proceed straight to write.
+        break;
+      }
+      // confirm — must not arrive when the strategy is dedup_ask. The
+      // dedup modal exposes append / save-anyway / cancel buttons only;
+      // a plain `confirm` here means the handler returned the wrong shape
+      // and writing would clobber the matched note. Reject explicitly.
+      if (strategy.kind === "dedup_ask") {
+        await enter(STATES.failed, { reason: "confirm_on_dedup_ask" });
+        return { kind: "failed", reason: "confirm_on_dedup_ask" };
+      }
+      break;
+    }
+  }
+
+  // ── WRITE ────────────────────────────────────────────────────────────
+  await enter(STATES.write, { kind: strategy.kind });
+  if (strategy.kind === "dedup_ask") {
+    await enter(STATES.failed, { reason: "preview_unresolved" });
+    return { kind: "failed", reason: "preview_unresolved" };
+  }
+  if (strategy.kind === "append") {
+    if (!(await deps.vault.exists(strategy.target))) {
+      await enter(STATES.failed, { reason: "append_target_missing" });
+      return { kind: "failed", reason: "append_target_missing" };
+    }
+    try {
+      await deps.writer.appendUnderDatedHeading(strategy.target, spec.body_markdown, {
+        expectedMtime,
+      });
+    } catch (err) {
+      const reason = `write:${stringifyError(err)}`;
+      await enter(STATES.failed, { reason });
+      return { kind: "failed", reason };
+    }
+    deps.jobQueue.enqueue({ kind: "index", path: strategy.target });
+    await enter(STATES.updateIndex, { path: strategy.target });
+    await enter(STATES.done, { mode: "append", path: strategy.target });
+    return { kind: "saved", path: strategy.target, mode: "append", spec };
+  }
+
+  // create
+  spec = { ...spec, related: strategy.related };
+  let path: string;
+  try {
+    const result = await deps.writer.writeNew(spec, { folder: deps.inboxFolder });
+    path = result.path;
+  } catch (err) {
+    const reason = `write:${stringifyError(err)}`;
+    await enter(STATES.failed, { reason });
+    return { kind: "failed", reason };
+  }
+  deps.jobQueue.enqueue({ kind: "index", path });
+  await enter(STATES.updateIndex, { path });
+  await enter(STATES.done, { mode: "create", path });
+  return { kind: "saved", path, mode: "create", spec };
+}
+
+function freshTurnId(): string {
+  return crypto.randomUUID();
+}
+
+function previewKindFor(strategy: IngestStrategy): IngestPreview["kind"] {
+  if (strategy.kind === "dedup_ask") return "dedup";
+  if (strategy.kind === "append") return "append";
+  if (strategy.kind === "split") return "split";
+  return "save";
+}
+
+function stringifyError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}

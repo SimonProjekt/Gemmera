@@ -9,10 +9,16 @@ const DEFAULT_TOP_K = 3;
 const SNIPPET_CHARS = 2000;
 
 /**
- * Stub IndexService backed by linear vault scan. Same behavior as the existing
- * `searchVault` in src/search.ts, but exposed through the IndexService
- * contract so the UI can be wired against an interface today and swapped for
- * a real index later (see planning/decisions/01-rust-integration.md).
+ * Stub IndexService backed by a linear vault scan.
+ *
+ * As of #14, vault-tagged turns ("ask" / "mixed") go through the
+ * HybridRetriever via `runQuery`. This linear scanner remains as the
+ * fallback context source for `meta` intent and any unclassified turn that
+ * lands in `runChat` — i.e., turns that do not warrant the full RAG loop.
+ *
+ * Do NOT wire new vault-grounded code paths against this — use
+ * `services.retriever` (HybridRetriever) so the retrieval-event invariant
+ * holds.
  */
 export class VaultLinearIndexService implements IndexService {
   constructor(private readonly vault: VaultService) {}
@@ -31,7 +37,10 @@ export class VaultLinearIndexService implements IndexService {
     for (const file of files) {
       const nameScore =
         terms.filter((t) => file.basename.toLowerCase().includes(t)).length * 2;
-      const headings = (await this.vault.getHeadings(file.path)).join(" ").toLowerCase();
+      const headings = (await this.vault.getHeadings(file.path))
+        .map((h) => h.text)
+        .join(" ")
+        .toLowerCase();
       const headingScore = terms.filter((t) => headings.includes(t)).length;
       const content = await this.vault.read(file.path);
       const lower = content.toLowerCase();

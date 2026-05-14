@@ -1,20 +1,89 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ChatHistoryStore } from "./services/chat-history";
+import { ChatSessionState } from "./services/chat-session-state";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
+import type { IntentLabel, RecentTurn, RouteDecision } from "./contracts/classifier";
 import type { Services } from "./services";
+import type { GemmeraSettings } from "./settings";
 import { parseFileOps, handleFileOps } from "./fileops";
+import { classifyTurn } from "./services/classifier-orchestrator";
+import { toDisambiguationRow } from "./services/classifier-events";
+import { runIngest, type IngestPreview, type PreviewDecision } from "./services/ingest-orchestrator";
+import { runMixed } from "./services/mixed-orchestrator";
+import { runQuery } from "./services/query-orchestrator";
+import { isAbortError, StreamingState } from "./services/streaming-state";
+import { createSynthesisNote } from "./services/synthesis-writer";
+import { dispatchToolCall, selectToolsForIntent, type ToolDispatchDeps } from "./services/tool-dispatcher";
+import { DisambiguationChip } from "./disambiguation-chip";
+import { IndexingPill } from "./ui/indexing-pill";
+import { openIngestPreview } from "./ui/ingest-preview-modal";
+import { openNotePreview } from "./ui/note-preview-modal";
+import { openSplitPreview } from "./ui/split-preview";
+import { openDeleteConfirm } from "./ui/delete-confirm-modal";
+import { openRenamePreview } from "./ui/rename-preview-modal";
+import { buildMessageDecoration } from "./message-decoration";
+import { showSaveUndoNotice } from "./notices";
+import { labelForState } from "./services/turn-status";
+import { CitationChipRow } from "./ui/citation-chips";
+import { ContextPanel, type RecentCapture } from "./ui/context-panel";
+import { openTurnInspector } from "./ui/turn-inspector";
+import { categorizeError, userMessageForCategory } from "./ui/error-category";
+import { HistoryDrawer } from "./ui/history-drawer";
 
 export const VIEW_TYPE = "gemmera-chat";
 
 export class GemmeraChatView extends ItemView {
   private messagesEl!: HTMLElement;
+  private inputAreaEl!: HTMLElement;
+  private contextPanelEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
-  private history: ChatMessage[] = [];
-  private model = "gemma3:latest";
 
-  constructor(leaf: WorkspaceLeaf, private readonly services: Services) {
+  private chip = new DisambiguationChip();
+  private chipEl: HTMLElement | null = null;
+  private statusChipEl: HTMLElement | null = null;
+  private pill: IndexingPill | null = null;
+
+  private escCleared = false;
+  private prefersReducedMotion = false;
+  private lastTurnId: string | undefined;
+  private streaming = new StreamingState();
+  private inFlightText: string | null = null;
+  private readonly sendLabel = "Skicka";
+  private readonly stopLabel = "Stoppa";
+  private drawer: HistoryDrawer | null = null;
+  private contextPanel: ContextPanel | null = null;
+  private recentCaptures: RecentCapture[] = [];
+  private readonly RECENT_CAPTURE_CAP = 8;
+  // Tracks the auto-confirm half of the inline-preview's edit→confirm
+  // two-step (#55). The first preview call renders the form and returns
+  // {action: "edit", spec: edited}; the orchestrator loops back with the
+  // edited spec and this flag short-circuits to {action: "confirm"} so the
+  // user only clicks Save once.
+  private inlinePreviewAutoConfirm = false;
+
+  constructor(
+    leaf: WorkspaceLeaf,
+    private readonly services: Services,
+    private readonly settings: GemmeraSettings,
+    // Shared with the plugin instance so pop-out / re-open survives the live
+    // chat (#43). Falls back to view-local construction in tests.
+    private readonly chatHistory: ChatHistoryStore,
+    private readonly chatState: ChatSessionState,
+  ) {
     super(leaf);
+    this.prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
+
+  // ── Compatibility shims for fields previously local to the view. Reads/writes
+  // are now redirected at the plugin-level ChatSessionState so all view
+  // instances (sidebar / tab / pop-out) see the same buffer. #43.
+  private get history(): ChatMessage[] { return this.chatState.history; }
+  private set history(v: ChatMessage[]) { this.chatState.history = v; }
+  private get recentTurns(): RecentTurn[] { return this.chatState.recentTurns; }
+  private set recentTurns(v: RecentTurn[]) { this.chatState.recentTurns = v; }
+  private get currentSessionId(): string | null { return this.chatState.currentSessionId; }
+  private set currentSessionId(v: string | null) { this.chatState.currentSessionId = v; }
 
   getViewType(): string {
     return VIEW_TYPE;
@@ -28,37 +97,115 @@ export class GemmeraChatView extends ItemView {
     return "message-square";
   }
 
+  /** Pre-fill the composer with text and focus it. Does NOT send. */
+  setComposerText(text: string): void {
+    this.inputEl.value = text;
+    this.inputEl.focus();
+  }
+
   async onOpen(): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass("gemmera-view");
 
-    const statusEl = container.createEl("div", { cls: "gemmera-status" });
+    const headerEl = container.createEl("div", { cls: "gemmera-header" });
+    const statusEl = headerEl.createEl("div", {
+      cls: "gemmera-status",
+      attr: { role: "status", "aria-live": "polite" },
+    });
     this.checkOllamaStatus(statusEl);
-    this.services.llm.pickDefaultModel().then((m) => { this.model = m; }).catch(() => {});
 
-    this.messagesEl = container.createEl("div", { cls: "gemmera-messages" });
+    this.pill = new IndexingPill(this.services.runnerStatus);
+    this.pill.mount(headerEl, async () => {
+      if (this.services.runnerControls.isPaused()) {
+        await this.services.runnerControls.resume();
+      } else {
+        await this.services.runnerControls.pause();
+      }
+    });
 
-    const inputArea = container.createEl("div", { cls: "gemmera-input-area" });
-    this.inputEl = inputArea.createEl("textarea", {
+    const bodyEl = container.createEl("div", { cls: "gemmera-body" });
+    const mainEl = bodyEl.createEl("div", { cls: "gemmera-main" });
+
+    this.messagesEl = mainEl.createEl("div", {
+      cls: "gemmera-messages",
+      attr: { role: "log", "aria-label": "Chat messages" },
+    });
+
+    this.statusChipEl = mainEl.createEl("div", { cls: "gemmera-status-chip" });
+    this.statusChipEl.hide();
+
+    this.inputAreaEl = mainEl.createEl("div", { cls: "gemmera-input-area" });
+    this.inputEl = this.inputAreaEl.createEl("textarea", {
       cls: "gemmera-input",
-      attr: { placeholder: "Skriv ett meddelande...", rows: "3" },
+      attr: {
+        placeholder: "Skriv ett meddelande...",
+        rows: "3",
+        "aria-label": "Message input",
+      },
     });
-    this.sendBtn = inputArea.createEl("button", {
+    this.sendBtn = this.inputAreaEl.createEl("button", {
       cls: "gemmera-send",
-      text: "Skicka",
+      text: this.sendLabel,
+      attr: { "aria-label": "Send message" },
     });
-    this.sendBtn.addEventListener("click", () => this.handleSend());
+    // Single handler: dispatch to send when idle, abort when streaming.
+    // Keeps the button always-enabled during a turn so Stop is reachable.
+    this.sendBtn.addEventListener("click", () => {
+      if (this.streaming.isStreaming()) this.cancelStreaming(this.inFlightText ?? undefined);
+      else void this.handleSend();
+    });
     this.inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (this.inputEl.value.trim().length > 0 && !this.escCleared) {
+          this.inputEl.value = "";
+          this.escCleared = true;
+          e.preventDefault();
+        } else {
+          this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+        }
+        return;
+      }
+      this.escCleared = false;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.handleSend();
       }
     });
+
+    this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
+    const historyDrawerEl = this.contextPanelEl.createEl("div", { cls: "gemmera-history" });
+    this.drawer = new HistoryDrawer(
+      historyDrawerEl,
+      this.chatHistory,
+      (session) => void this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err)),
+      () => this.startNewSession(),
+    );
+    const contextContentEl = this.contextPanelEl.createEl("div", { cls: "gemmera-context-content-host" });
+    this.contextPanel = new ContextPanel(contextContentEl);
+    this.contextPanel.setIdle(this.recentCaptures);
+
+    // chatHistory + chatState are shared with the plugin instance (#43), so
+    // detaching the view to a pop-out window and reopening preserves the
+    // live conversation. Replay any buffered turns into the new DOM.
+    //
+    // KNOWN LIMITATION (#152 review): replay is text-only. Route chips,
+    // classifier-decision badges, silent-save indicators, and citation
+    // chips are dropped on pop-out. Restoring them needs decorations
+    // stored alongside each turn in ChatSessionState — follow-up.
+    // Conversation continuity is preserved; visual polish is not.
+    for (const turn of this.history) {
+      this.appendMessage(turn.role === "user" ? "user" : "assistant", turn.content);
+    }
+    // Prune stale sessions on open, then render the drawer.
+    this.chatHistory.pruneIfNeeded().catch((err) => console.error("[gemmera] pruneIfNeeded:", err)).finally(() => {
+      this.renderHistoryDrawer().catch((err) => console.error("[gemmera] renderHistoryDrawer:", err));
+    });
   }
 
   async onClose(): Promise<void> {
-    // cleanup if needed
+    this.pill?.unmount();
+    this.pill = null;
   }
 
   private async checkOllamaStatus(el: HTMLElement): Promise<void> {
@@ -73,16 +220,417 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
-  private async handleSend(): Promise<void> {
+  private async handleSend(forcedLabel?: IntentLabel): Promise<void> {
     const text = this.inputEl.value.trim();
     if (!text) return;
+
+    // If chip is showing, queue and return — the chip is still for the
+    // first message and applies only to it.
+    if (this.chip.isShowing()) {
+      this.chip.enqueue(text);
+      this.inputEl.value = "";
+      return;
+    }
 
     this.inputEl.value = "";
     this.setInputDisabled(true);
 
-    this.history.push({ role: "user", content: text });
-    this.appendMessage("user", text);
+    const turnId = crypto.randomUUID();
+    this.lastTurnId = turnId;
+    // Track the in-flight text so the Stop button can refill the composer
+    // for an edit-and-retry that lands as a brand new turn.
+    this.inFlightText = text;
 
+    // ── Classify ──────────────────────────────────────────────────────
+    let route: RouteDecision | null = null;
+    if (!forcedLabel) {
+      try {
+        route = await classifyTurn(
+          { messageText: text, attachments: [], activeFile: null, recentTurns: this.recentTurns },
+          { llm: this.services.llm, promptLoader: this.services.promptLoader, eventWriter: this.services.classifierEventWriter, model: this.settings.chatModel },
+          turnId,
+        );
+      } catch {
+        // Transport error — fall through as "ask" so the main chat can
+        // surface the Ollama error to the user.
+      }
+    }
+
+    // ── Meta short-circuit ────────────────────────────────────────────
+    if (route?.shortCircuit && route.helpResponse) {
+      this.appendMessage("assistant", route.helpResponse);
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
+    // ── Disambiguation chip ───────────────────────────────────────────
+    if (!forcedLabel && route?.needsDisambiguation) {
+      this.setInputDisabled(false);
+      this.chip.hold(text, turnId, route.decision);
+      this.renderChip(route.decision.output?.rationale ?? "");
+      this.inputEl.focus();
+      return;
+    }
+
+    // ── Capture (#13) ─────────────────────────────────────────────────
+    const intent = forcedLabel ?? route?.label ?? "ask";
+    if (intent === "capture") {
+      await this.runCapture(text, turnId);
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "capture" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
+    // ── Mixed (#47) ───────────────────────────────────────────────────
+    if (intent === "mixed") {
+      const signal = this.setStreaming(true);
+      try {
+        await this.runMixed(text, turnId, signal);
+      } finally {
+        this.setStreaming(false);
+        this.inFlightText = null;
+      }
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "mixed" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
+    // ── Ask (#14) — vault-grounded query through the RAG tool loop ────
+    if (intent === "ask") {
+      const signal = this.setStreaming(true);
+      try {
+        await this.runAsk(text, turnId, route ?? null, signal);
+      } finally {
+        this.setStreaming(false);
+        this.inFlightText = null;
+      }
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "ask" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
+    // ── Chat (meta / fallback, no retrieval) ──────────────────────────
+    const signal = this.setStreaming(true);
+    try {
+      await this.runChat(text, intent, turnId, route ?? null, signal);
+    } finally {
+      this.setStreaming(false);
+      this.inFlightText = null;
+    }
+  }
+
+  private async runCapture(text: string, turnId: string): Promise<void> {
+    this.appendMessage("user", text);
+    this.contextPanel?.setIngestion("Ingesting…");
+    try {
+      const outcome = await runIngest(
+        { text },
+        {
+          llm: this.services.llm,
+          promptLoader: this.services.promptLoader,
+          retriever: this.services.retriever,
+          store: this.services.ingestionStore,
+          vault: this.services.vault,
+          writer: this.services.ingestWriter,
+          jobQueue: this.services.jobQueue,
+          preview: (preview) => this.routeIngestPreview(preview),
+          eventLog: this.services.eventLog,
+          turnId,
+          inboxFolder: this.settings.inboxFolder,
+          dedupThreshold: this.settings.dedupThreshold,
+          alwaysPreview: this.settings.alwaysPreviewBeforeSave,
+          onStateChange: (state, label) => {
+            if (state === "DONE" || state === "CANCELLED" || state === "TOOL_FAILED") {
+              this.hideStatusChip();
+            } else {
+              this.showStatusChip(label);
+              this.contextPanel?.setIngestion(label);
+            }
+          },
+        },
+      );
+      this.services.runnerStatus.recompute();
+
+      if (outcome.kind === "saved") {
+        this.recordCapture(outcome.path);
+        const verb = outcome.mode === "append" ? "Appended to" : "Saved to";
+        if (outcome.mode === "create") {
+          showSaveUndoNotice(this.app, outcome.path);
+        } else {
+          new Notice(`Gemmera: ${verb} ${outcome.path}`);
+        }
+        this.appendMessage("assistant", `${verb} **${outcome.path}**`);
+      } else if (outcome.kind === "split_saved") {
+        for (const p of outcome.paths) this.recordCapture(p);
+        new Notice(`Gemmera: saved ${outcome.paths.length} notes`);
+        const list = outcome.paths.map((p) => `- **${p}**`).join("\n");
+        this.appendMessage("assistant", `Saved ${outcome.paths.length} notes:\n${list}`);
+      } else if (outcome.kind === "cancelled") {
+        this.appendMessage("assistant", "Cancelled.");
+      } else if (outcome.kind === "skipped_existing") {
+        new Notice(`Gemmera: already saved as ${outcome.path}`);
+        this.appendMessage("assistant", `Already in vault: **${outcome.path}**`);
+      } else {
+        this.appendMessage("assistant", `Capture failed: ${outcome.reason}`);
+      }
+    } catch (err) {
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    } finally {
+      this.contextPanel?.setIdle(this.recentCaptures);
+      // Guard against a stuck auto-confirm if the orchestrator threw between
+      // the `edit` decision and its follow-up preview call — without this, the
+      // next save turn would silently skip the form.
+      this.inlinePreviewAutoConfirm = false;
+    }
+  }
+
+  private routeIngestPreview(preview: IngestPreview): Promise<PreviewDecision> {
+    // Auto-confirm the second leg of the inline edit→confirm two-step. The
+    // flag is only set after a kind:"save" preview, so it's safe to consume
+    // before deciding which UI surface to open next.
+    if (this.inlinePreviewAutoConfirm) {
+      this.inlinePreviewAutoConfirm = false;
+      return Promise.resolve({ action: "confirm" });
+    }
+    // Split previews always go through openSplitPreview (handles 1..N
+    // candidates uniformly). openIngestPreview doesn't know about
+    // `split_confirm` and would emit `{ action: "confirm" }` that the
+    // orchestrator rejects as `invalid_split_action`.
+    if (preview.kind === "split" && preview.candidates && preview.candidates.length > 0) {
+      return openSplitPreview(this.app, preview.candidates, { folder: this.settings.inboxFolder });
+    }
+    if (this.shouldUseInlinePreview(preview)) {
+      return this.openInlinePreview(preview);
+    }
+    return openIngestPreview(this.app, preview);
+  }
+
+  private shouldUseInlinePreview(preview: IngestPreview): boolean {
+    // Inline preview only replaces the editable save form. Append, dedup-ask,
+    // and split previews keep their modals — they have richer button rows
+    // and (for split) their own queue UX.
+    if (preview.kind !== "save") return false;
+    if (!this.settings.inlinePreviewInWidePanel) return false;
+    if (!this.contextPanel) return false;
+    return this.contextPanel.isWideLayoutActive();
+  }
+
+  private openInlinePreview(preview: IngestPreview): Promise<PreviewDecision> {
+    return new Promise((resolve) => {
+      this.contextPanel?.setInlinePreview(preview, this.settings.inboxFolder, (decision) => {
+        if (decision.action === "edit") this.inlinePreviewAutoConfirm = true;
+        resolve(decision);
+      });
+    });
+  }
+
+  private recordCapture(path: string): void {
+    const basename = path.split("/").pop()?.replace(/\.md$/, "") ?? path;
+    this.recentCaptures = [
+      { title: basename, path, timestamp: Date.now() },
+      ...this.recentCaptures,
+    ].slice(0, this.RECENT_CAPTURE_CAP);
+  }
+
+  private async runMixed(text: string, turnId: string, signal?: AbortSignal): Promise<void> {
+    this.appendMessage("user", text);
+    this.contextPanel?.setIngestion("Saving note…");
+
+    const ingestStatusEl = this.messagesEl.createEl("div", {
+      cls: "gemmera-mixed-status gemmera-mixed-status--ingest",
+      text: "Saving note…",
+    });
+    const queryStatusEl = this.messagesEl.createEl("div", {
+      cls: "gemmera-mixed-status gemmera-mixed-status--query",
+      text: "Searching notes…",
+    });
+    queryStatusEl.style.display = "none";
+
+    let savedPathSoFar: string | undefined;
+
+    try {
+      const outcome = await runMixed(text, {
+        llm: this.services.llm,
+        promptLoader: this.services.promptLoader,
+        retriever: this.services.retriever,
+        store: this.services.ingestionStore,
+        vault: this.services.vault,
+        writer: this.services.ingestWriter,
+        jobQueue: this.services.jobQueue,
+        preview: (preview) => this.routeIngestPreview(preview),
+        assembler: this.services.payloadAssembler,
+        eventLog: this.services.eventLog,
+        turnId,
+        inboxFolder: this.settings.inboxFolder,
+        dedupThreshold: this.settings.dedupThreshold,
+        alwaysPreview: this.settings.alwaysPreviewBeforeSave,
+        ingestSignal: signal,
+        querySignal: signal,
+        onStateChange: (state, label, phase) => {
+          if (phase === "ingest") {
+            ingestStatusEl.textContent = label;
+            this.contextPanel?.setIngestion(label);
+          } else {
+            queryStatusEl.style.display = "";
+            queryStatusEl.textContent = label;
+            if (this.contextPanel?.currentState.kind !== "query") {
+              this.contextPanel?.setQueryPending(text, label);
+            }
+          }
+        },
+        onHits: (hits) => this.contextPanel?.setQueryHits(hits),
+        onIngestComplete: (path) => {
+          savedPathSoFar = path;
+          this.recordCapture(path);
+        },
+      });
+
+      this.services.runnerStatus.recompute();
+      ingestStatusEl.remove();
+      queryStatusEl.remove();
+
+      if (outcome.kind === "cancelled") {
+        this.appendMessage("assistant", "Cancelled.");
+      } else if (outcome.kind === "failed") {
+        if (outcome.phase === "query" && outcome.savedPath) {
+          this.appendMessage("assistant", `Answer failed: ${outcome.reason}\n\nNote was saved to **${outcome.savedPath}**.`);
+        } else {
+          this.appendMessage("assistant", `Save failed: ${outcome.reason}`);
+        }
+      } else if (outcome.kind === "validation_failed") {
+        new Notice(`Gemmera: saved to ${outcome.savedPath}`);
+        this.appendMessage("assistant", `Saved to **${outcome.savedPath}**\n\n${outcome.answer}`);
+      } else {
+        new Notice(`Gemmera: saved to ${outcome.savedPath}`);
+        const citations = outcome.citations.length > 0
+          ? `\n\n*Sources: ${outcome.citations.map((c) => `[[${c}]]`).join(", ")}*`
+          : "";
+        this.appendMessage("assistant", `Saved to **${outcome.savedPath}**\n\n${outcome.answer}${citations}`);
+      }
+    } catch (err) {
+      ingestStatusEl.remove();
+      queryStatusEl.remove();
+      if (isAbortError(err)) {
+        const suffix = savedPathSoFar ? ` Note was saved to **${savedPathSoFar}**.` : "";
+        this.appendCancelledMessage(`Stopped.${suffix}`);
+        return;
+      }
+      if (savedPathSoFar) {
+        this.appendMessage("assistant", `Note was saved to **${savedPathSoFar}**, but the query failed unexpectedly.`);
+      }
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    } finally {
+      this.contextPanel?.setIdle(this.recentCaptures);
+      this.inlinePreviewAutoConfirm = false;
+    }
+  }
+
+  // INVARIANT (#14): every vault-tagged turn ("ask" intent, or "mixed" via
+  // runMixed) must reach `runQuery`, which exercises the hybrid retriever and
+  // emits a RETRIEVE event. Do NOT route ask intents through `runChat`: that
+  // path uses the linear scan kept only as a fallback for `meta`.
+  private async runAsk(
+    text: string,
+    turnId: string,
+    route: RouteDecision | null = null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const decoration = buildMessageDecoration(
+      route,
+      this.settings.showClassifierDecisions,
+      this.settings.alwaysPreviewBeforeSave,
+    );
+    this.appendMessage("user", text, decoration);
+    this.contextPanel?.setQueryPending(text, "Searching notes…");
+
+    const statusEl = this.messagesEl.createEl("div", {
+      cls: "gemmera-mixed-status gemmera-mixed-status--query",
+      text: "Searching notes…",
+    });
+
+    try {
+      const outcome = await runQuery(
+        { query: text },
+        {
+          retriever: this.services.retriever,
+          assembler: this.services.payloadAssembler,
+          llm: this.services.llm,
+          eventLog: this.services.eventLog,
+          turnId,
+          model: this.settings.chatModel,
+          signal,
+          onStateChange: (_state, label) => {
+            statusEl.textContent = label;
+          },
+          onHits: (hits) => this.contextPanel?.setQueryHits(hits),
+        },
+      );
+
+      statusEl.remove();
+
+      if (outcome.kind === "empty") {
+        this.appendMessage("assistant", "No relevant notes found.");
+      } else if (outcome.kind === "failed") {
+        this.appendMessage("assistant", `Answer failed: ${outcome.reason}`);
+      } else if (outcome.kind === "validation_failed") {
+        this.appendMessage("assistant", outcome.answer);
+      } else {
+        const el = this.messagesEl.createEl("div", { cls: "gemmera-message gemmera-message--assistant" });
+        el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+        el.createEl("p", { cls: "gemmera-message__text", text: outcome.answer });
+        if (outcome.citations.length > 0) {
+          this.renderCitationChips(el, outcome.citations);
+        }
+        this.renderSynthesisButton(el, {
+          question: text,
+          answer: outcome.answer,
+          citations: outcome.citations,
+          turnId,
+        });
+        this.scrollToBottom();
+      }
+    } catch (err) {
+      statusEl.remove();
+      if (isAbortError(err)) {
+        this.appendCancelledMessage("Stopped.");
+        return;
+      }
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    } finally {
+      this.contextPanel?.setIdle(this.recentCaptures);
+    }
+  }
+
+  private async runChat(
+    text: string,
+    intent: IntentLabel,
+    turnId: string,
+    route: RouteDecision | null = null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const decoration = buildMessageDecoration(
+      route,
+      this.settings.showClassifierDecisions,
+      this.settings.alwaysPreviewBeforeSave,
+    );
+
+    this.history.push({ role: "user", content: text });
+    this.appendMessage("user", text, decoration);
+
+    // Silent-save indicator: appears before the LLM call and is removed after.
+    let silentSaveEl: HTMLElement | null = null;
+    if (decoration.silentSave) {
+      silentSaveEl = this.messagesEl.createEl("div", {
+        cls: "gemmera-silent-save-indicator",
+        text: "saving as note…",
+      });
+    }
+
+    const userTs = Date.now();
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
 
     try {
@@ -90,44 +638,435 @@ export class GemmeraChatView extends ItemView {
       const messages = withContext(this.history, searchResults);
 
       const reply = await this.services.llm.chat({
-        model: this.model,
+        model: this.settings.chatModel,
         messages,
+        tools: selectToolsForIntent(intent, route),
+        signal,
         onToken: (token) => {
           textEl.textContent += token;
-          this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+          this.scrollToBottom();
         },
       });
       this.history.push({ role: "assistant", content: reply.content });
+
+      // Dispatch structured tool calls emitted by the LLM (#53, #62).
+      if (reply.toolCalls && reply.toolCalls.length > 0) {
+        const dispatchDeps: ToolDispatchDeps = {
+          vault: this.services.vault,
+          ingestWriter: this.services.ingestWriter,
+          jobQueue: this.services.jobQueue,
+          index: this.services.index,
+          linksIndex: this.services.linksIndexService,
+          inboxFolder: this.settings.inboxFolder,
+          chatModel: this.settings.chatModel,
+          openNotePreview: (opts: Parameters<typeof openNotePreview>[1]) =>
+            openNotePreview(this.app, opts),
+          confirmDelete: (path: string, preview: string) =>
+            openDeleteConfirm(this.app, path, preview),
+          confirmRename: (from: string, to: string, linkCount: number) =>
+            openRenamePreview(this.app, from, to, linkCount),
+          appendSystemMessage: (msg: string) => this.appendMessage("assistant", msg),
+        };
+        for (const call of reply.toolCalls) {
+          try {
+            const result = await dispatchToolCall(call, dispatchDeps);
+            if (result.kind === "done") {
+              const msgEl = this.appendMessage("assistant", result.summary);
+              if (result.citations && result.citations.length > 0) {
+                this.renderCitationChips(msgEl, result.citations);
+              }
+            } else if (result.kind === "unknown_tool") {
+              this.appendMessage("assistant", `Unknown tool: ${call.name}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.appendMessage("assistant", `Tool call failed: ${msg}`);
+          }
+        }
+      }
+
+      {
+        const ch = this.chatHistory;
+        (async () => {
+          if (!this.currentSessionId) {
+            const session = await ch.createSession();
+            this.currentSessionId = session.id;
+          }
+          const sid = this.currentSessionId;
+          await ch.appendTurn(sid, { role: "user", content: text, timestamp: userTs });
+          await ch.appendTurn(sid, { role: "assistant", content: reply.content, timestamp: Date.now() });
+          await this.renderHistoryDrawer();
+        })().catch(() => {});
+      }
+
+      // Record for classifier context on the next turn (last 3 only).
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent }];
+
       const ops = parseFileOps(reply.content);
       if (ops.length > 0) await handleFileOps(this.app, ops);
+
+      // Render citation chips from wikilinks in the response.
+      const citations = extractWikilinks(reply.content);
+      if (citations.length > 0) {
+        this.renderCitationChips(assistantEl, citations);
+      }
     } catch (err) {
-      textEl.textContent = `Fel: ${err instanceof Error ? err.message : "okänt fel"}`;
-      assistantEl.addClass("gemmera-message--error");
-      this.history.pop();
+      if (isAbortError(err)) {
+        // Preserve any partial tokens already rendered into textEl and mark
+        // the turn as cancelled. No assistant entry was pushed to history
+        // yet — that only happens after `services.llm.chat` resolves — so
+        // there's nothing to pop here. The user message stays so the next
+        // turn keeps the right context, which is what we want for an
+        // edit-and-retry that references the cancelled question.
+        this.markMessageCancelled(assistantEl, textEl);
+      } else {
+        assistantEl.remove();
+        this.history.pop();
+        this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+      }
     } finally {
+      silentSaveEl?.remove();
       this.setInputDisabled(false);
       this.inputEl.focus();
     }
   }
+
+  // ── Chat history drawer (#70 + #43) ──────────────────────────────────
+
+  private async renderHistoryDrawer(): Promise<void> {
+    await this.drawer?.render(this.currentSessionId);
+  }
+
+  private startNewSession(): void {
+    this.chatState.reset();
+    this.messagesEl.empty();
+    this.renderHistoryDrawer().catch(() => {});
+  }
+
+  private async switchToSession(
+    session: import("./services/chat-history").ChatSession,
+  ): Promise<void> {
+    this.currentSessionId = session.id;
+    this.recentTurns = [];
+    this.history = session.turns.map((t) => ({ role: t.role, content: t.content }));
+    this.messagesEl.empty();
+    for (const turn of session.turns) {
+      this.appendMessage(turn.role, turn.content);
+    }
+    await this.renderHistoryDrawer();
+    this.inputEl.focus();
+  }
+
+  // ── Disambiguation chip DOM ──────────────────────────────────────────
+
+  private renderChip(rationale: string): void {
+    this.removeChip();
+
+    const chip = this.inputAreaEl.createEl("div", {
+      cls: "gemmera-disambig-chip",
+      attr: { title: rationale },
+    });
+    chip.createEl("span", {
+      cls: "gemmera-disambig-chip__prompt",
+      text: "Did you mean to save this, or ask about it?",
+    });
+
+    const actions = chip.createEl("div", { cls: "gemmera-disambig-chip__actions" });
+
+    const saveBtn = actions.createEl("button", {
+      cls: "gemmera-disambig-chip__btn gemmera-disambig-chip__btn--save",
+      text: "Save",
+      attr: { "aria-label": "Save as note" },
+    });
+    const askBtn = actions.createEl("button", {
+      cls: "gemmera-disambig-chip__btn gemmera-disambig-chip__btn--ask",
+      text: "Ask",
+      attr: { "aria-label": "Ask question" },
+    });
+    const cancelBtn = actions.createEl("button", {
+      cls: "gemmera-disambig-chip__btn gemmera-disambig-chip__btn--cancel",
+      text: "Cancel",
+      attr: { "aria-label": "Cancel" },
+    });
+
+    saveBtn.addEventListener("click", () => this.handleChipAction("save"));
+    askBtn.addEventListener("click", () => this.handleChipAction("ask"));
+    cancelBtn.addEventListener("click", () => this.handleChipAction("cancel"));
+
+    // Prepend so the chip appears above the textarea.
+    this.inputAreaEl.insertBefore(chip, this.inputEl);
+    this.chipEl = chip;
+  }
+
+  private async handleChipAction(action: "save" | "ask" | "cancel"): Promise<void> {
+    this.removeChip();
+
+    if (action === "cancel") {
+      const cancelled = this.chip.cancel();
+      if (cancelled) {
+        await this.services.classifierEventWriter.writeDisambiguation(
+          toDisambiguationRow(cancelled.turnId, {
+            // null when the original decision was a fallback (no model output).
+            // Defaulting to "ask" here would mislabel fallback rows as model-
+            // emitted "ask" corrections in the eval golden set.
+            originalLabel: cancelled.originalDecision.output?.label ?? null,
+            originalConfidence: cancelled.originalDecision.output?.confidence ?? null,
+            chosenLabel: null,
+            cancelled: true,
+          }),
+        );
+      }
+    } else {
+      const resolution = this.chip.resolve(action);
+      if (resolution) {
+        const chosenLabel: IntentLabel = action === "save" ? "capture" : "ask";
+        await this.services.classifierEventWriter.writeDisambiguation(
+          toDisambiguationRow(resolution.turnId, {
+            originalLabel: resolution.originalDecision.output?.label ?? null,
+            originalConfidence: resolution.originalDecision.output?.confidence ?? null,
+            chosenLabel,
+            cancelled: false,
+          }),
+        );
+        if (chosenLabel === "capture") {
+          await this.runCapture(resolution.text, resolution.turnId);
+          this.recentTurns = [
+            ...this.recentTurns.slice(-2),
+            { text: resolution.text, intent: "capture" },
+          ];
+        } else {
+          await this.runAsk(resolution.text, resolution.turnId);
+          this.recentTurns = [
+            ...this.recentTurns.slice(-2),
+            { text: resolution.text, intent: "ask" },
+          ];
+        }
+      }
+    }
+
+    // Process any messages submitted while the chip was showing.
+    // Catch per-iteration: drainQueue() already cleared the internal queue,
+    // so an uncaught throw would silently drop everything after the failing item.
+    for (const queued of this.chip.drainQueue()) {
+      this.inputEl.value = queued;
+      try {
+        await this.handleSend();
+      } catch {
+        // runChat handles display errors internally; this guard ensures the
+        // remaining queued messages are not lost on an unexpected throw.
+      }
+    }
+  }
+
+  private removeChip(): void {
+    this.chipEl?.remove();
+    this.chipEl = null;
+  }
+
+  private showStatusChip(label: string): void {
+    if (!this.statusChipEl) return;
+    this.statusChipEl.textContent = label;
+    this.statusChipEl.show();
+  }
+
+  private hideStatusChip(): void {
+    this.statusChipEl?.hide();
+  }
+
+  private renderCitationChips(parent: HTMLElement, citations: string[], needsReview = new Set<string>()): void {
+    if (citations.length === 0) return;
+    new CitationChipRow(this.app, parent, citations, needsReview);
+  }
+
+  private renderSynthesisButton(
+    parent: HTMLElement,
+    payload: { question: string; answer: string; citations: string[]; turnId: string },
+  ): void {
+    const btn = parent.createEl("button", {
+      cls: "gemmera-synthesis-btn",
+      text: "Save answer as note",
+      attr: { "aria-label": "Save this answer as a synthesis note" },
+    });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      try {
+        const { path } = await createSynthesisNote(
+          {
+            question: payload.question,
+            answer: payload.answer,
+            citations: payload.citations,
+            model: this.settings.chatModel,
+            runId: payload.turnId,
+          },
+          this.services.ingestWriter,
+          { folder: this.settings.inboxFolder },
+        );
+        btn.remove();
+        new Notice(`Gemmera: synthesis saved to ${path}`);
+        this.appendMessage("assistant", `Synthesis saved to **${path}**`);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Save answer as note";
+        new Notice(`Gemmera: synthesis save failed — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+  }
+
+  // ── DOM helpers ──────────────────────────────────────────────────────
 
   private setInputDisabled(disabled: boolean): void {
     this.inputEl.disabled = disabled;
     this.sendBtn.disabled = disabled;
   }
 
+  /**
+   * Toggle the composer between idle (Send) and streaming (Stop). The Send
+   * button stays enabled while streaming so the user can interrupt; only the
+   * textarea is disabled so they can't queue a second turn.
+   *
+   * Overloaded so callers never need to non-null-assert the return value:
+   * `setStreaming(true)` is statically typed to return `AbortSignal`,
+   * `setStreaming(false)` returns `void`.
+   *
+   * KNOWN GAP: Stop is unreachable while the classifier-orchestrator is
+   * deciding the intent (handleSend awaits classifyTurn before the
+   * setStreaming(true) call below). Classify is a single small LLM call so
+   * this is acceptable in practice; threading the signal into
+   * classifier-orchestrator is a follow-up (touches its public API and
+   * tests across the classifier stack).
+   */
+  private setStreaming(active: true): AbortSignal;
+  private setStreaming(active: false): void;
+  private setStreaming(active: boolean): AbortSignal | void {
+    if (active) {
+      const s = this.streaming.begin();
+      this.inputEl.disabled = true;
+      this.sendBtn.disabled = false;
+      this.sendBtn.setText(this.stopLabel);
+      this.sendBtn.setAttribute("aria-label", "Stop generation");
+      this.sendBtn.addClass("gemmera-send--stop");
+      return s;
+    }
+    this.streaming.end();
+    this.inputEl.disabled = false;
+    this.sendBtn.disabled = false;
+    this.sendBtn.setText(this.sendLabel);
+    this.sendBtn.setAttribute("aria-label", "Send message");
+    this.sendBtn.removeClass("gemmera-send--stop");
+  }
+
+  /**
+   * Refill the composer with the in-flight user text so the user can edit and
+   * resend as a *new* turn (each Send creates a fresh turnId / userTs, so the
+   * cancelled turn is preserved in history alongside the retry).
+   */
+  private cancelStreaming(restoreText?: string): void {
+    if (!this.streaming.cancel()) return;
+    if (restoreText) {
+      this.inputEl.value = restoreText;
+    }
+    // Clear inFlightText so any early-exit path through the next handleSend
+    // (empty composer, etc.) can't see a stale value from the cancelled
+    // turn — the textarea is now the source of truth for the retry. #145.
+    this.inFlightText = null;
+    this.setStreaming(false);
+    this.inputEl.focus();
+  }
+
+  private scrollToBottom(): void {
+    this.messagesEl.scrollTo({
+      top: this.messagesEl.scrollHeight,
+      behavior: this.prefersReducedMotion ? "auto" : "smooth",
+    });
+  }
+
+  /**
+   * Mark a streaming assistant message as cancelled. Preserves any partial
+   * tokens already appended to `textEl` and adds a small "[cancelled]" tag so
+   * the user can tell the turn didn't finish on its own.
+   */
+  private markMessageCancelled(el: HTMLElement, textEl: HTMLElement): void {
+    el.addClass("gemmera-message--cancelled");
+    if (!textEl.textContent || textEl.textContent.trim().length === 0) {
+      textEl.textContent = "(no output)";
+    }
+    const tag = el.createEl("span", { cls: "gemmera-message__cancelled", text: "stopped" });
+    tag.setAttribute("aria-label", "Turn cancelled");
+  }
+
+  /**
+   * Append a fresh "stopped" message for paths that hadn't started streaming
+   * yet (runAsk / runMixed during the retrieval phase).
+   */
+  private appendCancelledMessage(text: string): void {
+    const el = this.messagesEl.createEl("div", {
+      cls: "gemmera-message gemmera-message--assistant gemmera-message--cancelled",
+    });
+    el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+    el.createEl("p", { cls: "gemmera-message__text", text });
+    el.createEl("span", { cls: "gemmera-message__cancelled", text: "stopped" });
+    this.scrollToBottom();
+  }
+
   private appendStreamingMessage(): { el: HTMLElement; textEl: HTMLElement } {
     const el = this.messagesEl.createEl("div", { cls: "gemmera-message gemmera-message--assistant" });
     el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
     const textEl = el.createEl("p", { cls: "gemmera-message__text", text: "" });
-    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+    this.scrollToBottom();
     return { el, textEl };
   }
 
-  private appendMessage(role: "user" | "assistant", text: string): void {
+  private appendMessage(
+    role: "user" | "assistant",
+    text: string,
+    decoration?: { badge: string | null; tooltip: string | null } | null,
+  ): HTMLElement {
     const msg = this.messagesEl.createEl("div", { cls: `gemmera-message gemmera-message--${role}` });
     msg.createEl("span", { cls: "gemmera-message__role", text: role === "user" ? "Du" : "Gemma" });
     msg.createEl("p", { cls: "gemmera-message__text", text });
-    this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
+    if (decoration?.badge) {
+      const badge = msg.createEl("span", { cls: "gemmera-classifier-badge", text: decoration.badge });
+      if (decoration.tooltip) badge.setAttribute("title", decoration.tooltip);
+    }
+    this.scrollToBottom();
+    return msg;
+  }
+
+  private appendErrorMessage(err: unknown, onRetry: () => void): void {
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const category = categorizeError(err);
+    const displayText = userMessageForCategory(category, rawMessage);
+
+    const el = this.messagesEl.createEl("div", {
+      cls: "gemmera-message gemmera-message--assistant gemmera-message--error",
+    });
+    el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+    el.createEl("p", { cls: "gemmera-message__text", text: displayText });
+    const retryBtn = el.createEl("button", {
+      cls: "gemmera-retry-btn",
+      text: "Retry",
+      attr: { "aria-label": "Retry last message" },
+    });
+    retryBtn.addEventListener("click", () => {
+      el.remove();
+      onRetry();
+    });
+
+    if (category === "ollama_down") {
+      new Notice("Gemmera: Ollama is not responding. Check Settings → Gemmera → Ollama.");
+    }
+
+    this.scrollToBottom();
+  }
+
+  async openTurnInspector(): Promise<void> {
+    if (!this.lastTurnId) {
+      new Notice("Gemmera: No turn recorded yet — send a message first.");
+      return;
+    }
+    const rawEntries = await this.services.eventLog.eventsFor(this.lastTurnId);
+    openTurnInspector(this.app, rawEntries);
   }
 }
 
@@ -146,4 +1085,20 @@ export function withContext(
     { role: "assistant", content: "Förstått, jag har läst anteckningarna." },
     ...history,
   ];
+}
+
+/** Extract unique [[wikilink]] paths from markdown text. */
+export function extractWikilinks(text: string): string[] {
+  const re = /\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g;
+  const seen = new Set<string>();
+  const result: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const path = m[1].trim();
+    if (path && !seen.has(path)) {
+      seen.add(path);
+      result.push(path);
+    }
+  }
+  return result;
 }

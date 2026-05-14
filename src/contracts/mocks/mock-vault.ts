@@ -1,8 +1,9 @@
-import type { VaultFileRef, VaultService } from "../vault";
+import type { HeadingRef, VaultFileRef, VaultService, VaultStat } from "../vault";
 
 export class MockVaultService implements VaultService {
   private files = new Map<string, string>();
-  private headings = new Map<string, string[]>();
+  private headings = new Map<string, HeadingRef[]>();
+  private mtimes = new Map<string, number>();
 
   constructor(initial: Record<string, string> = {}) {
     for (const [path, content] of Object.entries(initial)) {
@@ -31,18 +32,54 @@ export class MockVaultService implements VaultService {
     this.files.set(path, content);
   }
 
+  async modify(path: string, content: string): Promise<void> {
+    if (!this.files.has(path)) throw new Error(`File not found: ${path}`);
+    this.files.set(path, content);
+  }
+
+  /** Test-only convenience: overwrite an existing file or create a new one. */
+  setFile(path: string, content: string): void {
+    this.files.set(path, content);
+  }
+
   async append(path: string, content: string): Promise<void> {
     const existing = this.files.get(path);
     if (existing === undefined) throw new Error(`File not found: ${path}`);
     this.files.set(path, existing + content);
   }
 
-  async getHeadings(path: string): Promise<string[]> {
+  async getHeadings(path: string): Promise<HeadingRef[]> {
     return this.headings.get(path) ?? [];
   }
 
-  setHeadings(path: string, headings: string[]): void {
-    this.headings.set(path, headings);
+  async stat(path: string): Promise<VaultStat> {
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`File not found: ${path}`);
+    return { mtime: this.mtimes.get(path) ?? 0, size: content.length };
+  }
+
+  async trash(path: string): Promise<void> {
+    if (!this.files.has(path)) throw new Error(`File not found: ${path}`);
+    this.files.delete(path);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    const content = this.files.get(from);
+    if (content === undefined) throw new Error(`File not found: ${from}`);
+    if (this.files.has(to)) throw new Error(`File already exists: ${to}`);
+    this.files.delete(from);
+    this.files.set(to, content);
+  }
+
+  setMtime(path: string, mtime: number): void {
+    this.mtimes.set(path, mtime);
+  }
+
+  setHeadings(path: string, headings: HeadingRef[] | string[]): void {
+    const refs: HeadingRef[] = headings.map((h, i) =>
+      typeof h === "string" ? { level: 2, text: h, offset: i } : h,
+    );
+    this.headings.set(path, refs);
   }
 }
 

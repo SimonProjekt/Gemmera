@@ -1,21 +1,31 @@
 {
   "name": "gemmera",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Local knowledge base Obsidian plugin powered by Gemma 4 via Ollama",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:classifier": "tsx eval/runner/classify.ts",
+    "eval:classifier:mock": "tsx eval/runner/classify.ts --mock",
+    "eval:classifier:ci": "tsx eval/runner/classify.ts --mock --compare eval/classifier-golden/baseline-mock.json",
+    "eval:retrieval": "tsx eval/runner/retrieval.ts",
+    "eval:retrieval:mock": "tsx eval/runner/retrieval.ts --mock",
+    "eval:retrieval:ci": "tsx eval/runner/retrieval.ts --mock --compare eval/retrieval-golden/baseline.json"
   },
-  "dependencies": {},
+  "dependencies": {
+    "ajv": "^8.20.0"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "obsidian": "latest",
-    "esbuild": "0.24.2",
-    "typescript": "5.6.3",
     "builtin-modules": "4.0.0",
+    "esbuild": "0.24.2",
+    "obsidian": "latest",
+    "tsx": "^4.19.2",
+    "typescript": "5.6.3",
     "vitest": "^2.1.9"
   }
 }

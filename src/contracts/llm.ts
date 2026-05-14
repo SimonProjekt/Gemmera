@@ -30,6 +30,11 @@ export interface ChatOptions {
   tools?: Tool[];
   onToken?: (token: string) => void;
   signal?: AbortSignal;
+  /** Constrain output to valid JSON when set. */
+  format?: "json";
+  /** Stream tokens via onToken. Defaults to true for chat; classifier
+   *  calls typically set stream=false for a single JSON blob. */
+  stream?: boolean;
 }
 
 export type LLMReachability = "running" | "missing";

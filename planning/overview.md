@@ -9,7 +9,7 @@ This document is the start-here guide to the plan. Specialized docs cover each l
 One chat box, two user behaviors routed by an auto classifier:
 
 - **Capture.** The user drops content with optional instructions ("save this as a meeting note about Q2"). Cowork parses it, checks the vault for duplicates, generates a preview note with title, tags, and frontmatter, and writes it to `Inbox/` after user confirmation.
-- **Ask.** The user asks a question. Cowork retrieves from a hybrid index over the vault, reranks, and answers with citations back to specific notes.
+- **Ask.** The user asks a question. Cowork retrieves from a hybrid index over the vault and answers with citations back to specific notes.
 
 Gemma is the orchestrator for both flows. The vault — plain Markdown files Obsidian already manages — is the canonical long-term store.
 
@@ -19,11 +19,11 @@ What ships in v1:
 
 - Obsidian plugin, desktop-only (`isDesktopOnly: true` in manifest).
 - Local Gemma 4 E4B orchestration via Ollama. The plugin spawns and manages Ollama so users do not need to know it exists.
-- BGE-M3 embeddings; bge-reranker-v2-m3 reranker.
-- DuckDB index at `vault/.coworkmd/index.duckdb` (vector + BM25 + link graph).
+- BGE-M3 embeddings.
+- Current storage uses JSON state at `vault/.coworkmd/state.json`, binary vectors at `vault/.coworkmd/vectors.bin` plus `vectors.json`, and in-memory BM25/link indexes rebuilt from ingestion events.
 - Responsive chat view, default in the right sidebar, pop-out to main-area tab or OS window.
 - Capture path: paste/drop → parse → dedup check → preview → save to `Inbox/` → index.
-- Ask path: plan → hybrid retrieve → rerank → stream answer with citations.
+- Ask path: classify → hybrid retrieve → assemble payload → answer with validated citations.
 - Full CRUD from Gemma with safety rules:
   - Create / append via `save_note(mode=create|append)`.
   - Read via `search_notes`, `get_note`, `find_related_notes`, `list_folder`.
@@ -32,8 +32,8 @@ What ships in v1:
   - Rename / move via `rename_or_move_note`, which uses Obsidian's `FileManager.renameFile` so links update atomically.
 - Six system prompts: `ingest-parser`, `note-writer`, `intent-classifier`, `dedup-decider`, `retrieval-reasoner`, `synthesis-writer`.
 - `.coworkignore` (gitignore-style globs) for controlling indexing scope.
-- Local event log at `vault/.coworkmd/events.duckdb`.
-- Chat history persistence at `vault/.coworkmd/chats.duckdb`.
+- Current event log is in-memory and surfaced through the dev-mode Turn Inspector.
+- Current chat history persists as JSON at `vault/.coworkmd/chats.json`.
 - Golden-set eval scaffolding for retrieval quality regressions.
 
 Explicitly out of scope for v1:
@@ -41,7 +41,7 @@ Explicitly out of scope for v1:
 - Mobile (desktop-only plugin).
 - Cloud model fallback (local-only; no hosted provider integration).
 - Full-body note rewrites (append is the only body-update mode).
-- Model variants beyond E4B + BGE-M3 + reranker (no 26B MoE, no E2B, no swap ladder).
+- Model variants beyond E4B + BGE-M3 (no 26B MoE, no E2B, no swap ladder).
 - PDF, image, and audio ingestion (plain text and Markdown only in v1).
 - Canvas synthesis outputs.
 - Graph view highlighting of cited notes.
@@ -54,7 +54,7 @@ The system is four layers inside a single Obsidian plugin:
 
 1. **UI layer** — responsive `ItemView` chat, `NotePreviewModal` for pre-save confirmation, a dedicated delete-confirmation modal, standard settings and status surfaces. See `ui-surfaces.md`.
 2. **Tool loop** — Gemma as orchestrator, a small set of well-defined tools, and two main state machines (ingest + query) plus a destructive-operation mini-state-machine. See `tool-loop.md`.
-3. **RAG pipeline** — structure-aware chunking, BGE-M3 embeddings, hybrid retrieval with cross-encoder rerank and Obsidian graph boosts, stored in DuckDB. See `rag.md`.
+3. **RAG pipeline** — structure-aware chunking, BGE-M3 embeddings, hybrid retrieval with BM25 and Obsidian graph boosts. See `rag.md`.
 4. **Runtime** — plugin-managed Ollama lifecycle, `.coworkignore` for indexing scope. See `runtime.md`.
 
 The plugin reuses Obsidian's own `MetadataCache`, `Vault` events, `FileManager`, and `MarkdownRenderer` rather than reimplementing these subsystems. This is the single biggest reason to build as a plugin rather than standalone.
@@ -65,14 +65,13 @@ The plugin reuses Obsidian's own `MetadataCache`, `Vault` events, `FileManager`,
 - Ollama for local model serving (plugin spawns and manages).
 - Gemma 4 E4B for all orchestration (~3 GB).
 - BGE-M3 for embeddings (~2 GB).
-- bge-reranker-v2-m3 for rerank (~0.6 GB).
-- DuckDB with the `vss` extension for vectors and `fts` for BM25.
+- JSON metadata, binary vector files, and in-memory BM25/link indexes for the current implementation. DuckDB remains a possible future storage backend, not the shipped v0.1 storage layer.
 - MIT license.
 - Distribution: BRAT during beta, Obsidian Community Plugins at GA.
 
 ## Milestones
 
-**M1 — working local loop.** Plugin installs and manages Ollama, pulls the three required models, registers a right-sidebar chat view, and completes one end-to-end capture and ask cycle on plain text / Markdown content. Day-one acceptance tests (see below) pass.
+**M1 — working local loop.** Plugin installs and manages Ollama, verifies the required local models, registers a right-sidebar chat view, and completes one end-to-end capture and ask cycle on plain text / Markdown content. Day-one acceptance tests (see below) pass.
 
 **M2 — richer capture and full CRUD.** Dedup detection and the `ASK_USER_DEDUP` branch. `PROPOSE_APPEND`, `PROPOSE_SPLIT`, `PROPOSE_NEW_WITH_LINKS`. `delete_note` and `rename_or_move_note`. Frontmatter editing in the preview modal. Wide-mode tab layout with inline preview. Pop-out windows. `create_synthesis_note`.
 
@@ -105,7 +104,7 @@ Scripted tests that must pass before moving past M1:
 - `overview.md` — this file. MVP scope, architecture summary, milestones, doc map.
 - `tool-loop.md` — tool inventory, state machine requirements, state machines, retry policy, hard stops, intent classifier scope, prompt library.
 - `classifier.md` — intent classifier: taxonomy, input/output contract, skip conditions, confidence thresholds, disambiguation UX, evaluation.
-- `rag.md` — chunking parameters, embeddings, hybrid retrieval, reranker, DuckDB schema, frontmatter contract, cold-start vs steady-state behavior, evaluation.
+- `rag.md` — target RAG architecture, including chunking parameters, embeddings, optional reranking, DuckDB schema ideas, frontmatter contract, cold-start vs steady-state behavior, and evaluation.
 - `ui-surfaces.md` — chat view, preview modal, settings tab, status bar, ribbon, commands, context menus, notices, keyboard flow, accessibility.
 - `runtime.md` — Ollama lifecycle and `.coworkignore` semantics.
 
@@ -119,7 +118,7 @@ Future docs (not yet needed):
 - Plugin architecture on top of Obsidian (not a standalone app).
 - Desktop-only.
 - Local-only: no cloud model fallback in v1.
-- Single model set: Gemma 4 E4B + BGE-M3 + bge-reranker-v2-m3. No variants.
+- Single current model set: Gemma 4 E4B + BGE-M3. No variants.
 - Append-only body updates in v1. No full-body replacement tool.
 - Gemma can create, read, append, rename, move, and delete notes. Delete always requires an explicit, non-overridable confirmation.
 - Responsive chat view. Default to right sidebar. Pop-out to tab or OS window supported from day one.

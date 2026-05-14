@@ -7,7 +7,7 @@ import type {
 } from "../contracts";
 
 const DEFAULT_BASE = "http://127.0.0.1:11434";
-const DEFAULT_MODEL = "gemma3:latest";
+const DEFAULT_MODEL = "gemma4:e4b";
 
 interface OllamaChunk {
   message?: { content: string };
@@ -45,20 +45,33 @@ export class OllamaLLMService implements LLMService {
   }
 
   async chat(opts: ChatOptions): Promise<LLMResponse> {
-    const { messages, model = DEFAULT_MODEL, onToken, signal } = opts;
+    const {
+      messages,
+      model = DEFAULT_MODEL,
+      onToken,
+      signal,
+      format,
+      stream = true,
+    } = opts;
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
         messages: messages.map(toOllamaMessage),
-        stream: true,
+        stream,
+        ...(format ? { format } : {}),
       }),
       signal,
     });
     if (!res.ok) throw new Error(`Ollama error: ${res.status}`);
-    if (!res.body) throw new Error("No response body");
 
+    if (!stream) {
+      const data = (await res.json()) as { message?: { content: string } };
+      return { content: data.message?.content ?? "" };
+    }
+
+    if (!res.body) throw new Error("No response body");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";

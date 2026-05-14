@@ -1,5 +1,5 @@
 import type { App, TFile } from "obsidian";
-import type { VaultFileRef, VaultService } from "../contracts";
+import type { HeadingRef, VaultFileRef, VaultService, VaultStat } from "../contracts";
 
 export class ObsidianVaultService implements VaultService {
   constructor(private readonly app: App) {}
@@ -26,15 +26,41 @@ export class ObsidianVaultService implements VaultService {
     await this.app.vault.create(path, content);
   }
 
+  async modify(path: string, content: string): Promise<void> {
+    const file = this.requireFile(path);
+    await this.app.vault.modify(file, content);
+  }
+
   async append(path: string, content: string): Promise<void> {
     const file = this.requireFile(path);
     await this.app.vault.append(file, content);
   }
 
-  async getHeadings(path: string): Promise<string[]> {
+  async stat(path: string): Promise<VaultStat> {
+    const file = this.requireFile(path);
+    return { mtime: file.stat.mtime, size: file.stat.size };
+  }
+
+  async getHeadings(path: string): Promise<HeadingRef[]> {
     const file = this.requireFile(path);
     const cache = this.app.metadataCache.getFileCache(file);
-    return cache?.headings?.map((h) => h.heading) ?? [];
+    return (
+      cache?.headings?.map((h) => ({
+        level: h.level,
+        text: h.heading,
+        offset: h.position.start.offset,
+      })) ?? []
+    );
+  }
+
+  async trash(path: string): Promise<void> {
+    const file = this.requireFile(path);
+    await this.app.vault.trash(file, true);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    const file = this.requireFile(from);
+    await this.app.fileManager.renameFile(file, to);
   }
 
   private requireFile(path: string): TFile {
