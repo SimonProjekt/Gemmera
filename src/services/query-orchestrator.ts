@@ -54,6 +54,13 @@ export interface QueryOrchestratorDeps {
   signal?: AbortSignal;
   /** Called synchronously on each state entry so the UI can update its status chip. */
   onStateChange?: TurnStatusCallback;
+  /**
+   * Called once with the hits the query loop will actually use, after
+   * RETRIEVE (and after a successful RERANK, if a reranker is configured).
+   * Wired so the context panel (#42) can render chunks with scores and
+   * why-matched tags while the model is still generating the answer.
+   */
+  onHits?: (hits: RetrievalHit[]) => void;
   /** Shared retry budget for model-output retries across this turn. */
   retryBudget?: RetryBudget;
 }
@@ -135,6 +142,8 @@ export async function runQuery(
       // intentional skip
     }
   }
+
+  deps.onHits?.(hits);
 
   // ── ASSEMBLE_CONTEXT ──────────────────────────────────────────────────
   await enter(STATES.assembleContext);
