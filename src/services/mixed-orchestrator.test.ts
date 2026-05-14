@@ -171,44 +171,64 @@ describe("runMixed", () => {
     expect(queryEntries).toHaveLength(0);
   });
 
-  it("cancelled mid-query via signal: note is saved, query phase fails gracefully", async () => {
-    const queryReply = JSON.stringify({ answer: "Answer.", citations: [] });
-
+  it("cancelled mid-query via signal (pre-abort): note is saved, query fails with savedPath", async () => {
     const queryController = new AbortController();
-    const vault = new MockVaultService({});
-    const store = new InMemoryIngestionStore();
-    const queue = new InMemoryJobQueue();
-    const writer = new IngestWriter(vault);
-    const eventLog = new InMemoryEventLog();
-
-    // Abort the query signal immediately
     queryController.abort();
 
-    const deps: MixedOrchestratorDeps & { eventLog: InMemoryEventLog } = {
-      llm: new SequenceLLM([specReply(), queryReply]),
-      promptLoader,
-      retriever: new StubRetriever([makeHit("note.md")]),
-      store,
-      vault,
-      writer,
-      jobQueue: queue,
-      preview: confirmPreview,
-      assembler: new StubAssembler([makeChunk("note.md")]),
-      eventLog,
-      turnId: "turn-2",
-      alwaysPreview: false,
-      querySignal: queryController.signal,
-    };
+    const deps = setup({ llmReplies: [specReply()] });
+    deps.querySignal = queryController.signal;
 
     const outcome = await runMixed("test", deps);
 
-    // Query phase failed (aborted) but ingest note was preserved
     expect(outcome.kind).toBe("failed");
     if (outcome.kind !== "failed") return;
     expect(outcome.phase).toBe("query");
+    expect(outcome.savedPath).toBeTruthy();
 
-    // Verify the job queue has an index job for the saved note (ingest completed)
-    const jobs = queue.drain();
+    const jobs = (deps.jobQueue as InMemoryJobQueue).drain();
+    expect(jobs.some((j) => j.kind === "index")).toBe(true);
+  });
+
+  it("in-flight query abort: note is saved, query phase fails after LLM aborted", async () => {
+    const queryController = new AbortController();
+
+    // First LLM call (ingest parse): resolves immediately.
+    // Second call (query generate): hangs until signal is aborted.
+    let calls = 0;
+    const blockingLlm: LLMService = {
+      async chat(opts: ChatOptions): Promise<LLMResponse> {
+        if (calls++ === 0) return { content: specReply() };
+        return new Promise((_, reject) => {
+          if (opts.signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+          }
+          opts.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        });
+      },
+      async isReachable(): Promise<LLMReachability> { return "running"; },
+      async listModels(): Promise<string[]> { return []; },
+      async pickDefaultModel(): Promise<string> { return "test-model"; },
+    };
+
+    const deps = setup({ llmReplies: [] });
+    deps.llm = blockingLlm;
+    deps.querySignal = queryController.signal;
+
+    // Abort after ingest completes but while query is in flight
+    setTimeout(() => queryController.abort(), 0);
+
+    const outcome = await runMixed("test", deps);
+
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") return;
+    expect(outcome.phase).toBe("query");
+    // savedPath must be set so the UI can inform the user the note was saved
+    expect(outcome.savedPath).toBeTruthy();
+
+    const jobs = (deps.jobQueue as InMemoryJobQueue).drain();
     expect(jobs.some((j) => j.kind === "index")).toBe(true);
   });
 

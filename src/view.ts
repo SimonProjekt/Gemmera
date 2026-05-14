@@ -249,6 +249,8 @@ export class GemmeraChatView extends ItemView {
     });
     queryStatusEl.style.display = "none";
 
+    let savedPathSoFar: string | undefined;
+
     try {
       const outcome = await runMixed(text, {
         llm: this.services.llm,
@@ -273,6 +275,7 @@ export class GemmeraChatView extends ItemView {
             queryStatusEl.textContent = label;
           }
         },
+        onIngestComplete: (path) => { savedPathSoFar = path; },
       });
 
       this.services.runnerStatus.recompute();
@@ -282,8 +285,11 @@ export class GemmeraChatView extends ItemView {
       if (outcome.kind === "cancelled") {
         this.appendMessage("assistant", "Cancelled.");
       } else if (outcome.kind === "failed") {
-        const phaseLabel = outcome.phase === "ingest" ? "Save" : "Answer";
-        this.appendMessage("assistant", `${phaseLabel} failed: ${outcome.reason}`);
+        if (outcome.phase === "query" && outcome.savedPath) {
+          this.appendMessage("assistant", `Answer failed: ${outcome.reason}\n\nNote was saved to **${outcome.savedPath}**.`);
+        } else {
+          this.appendMessage("assistant", `Save failed: ${outcome.reason}`);
+        }
       } else if (outcome.kind === "validation_failed") {
         new Notice(`Gemmera: saved to ${outcome.savedPath}`);
         this.appendMessage("assistant", `Saved to **${outcome.savedPath}**\n\n${outcome.answer}`);
@@ -297,6 +303,9 @@ export class GemmeraChatView extends ItemView {
     } catch (err) {
       ingestStatusEl.remove();
       queryStatusEl.remove();
+      if (savedPathSoFar) {
+        this.appendMessage("assistant", `Note was saved to **${savedPathSoFar}**, but the query failed unexpectedly.`);
+      }
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     }
   }

@@ -18,7 +18,7 @@ export type MixedPhase = "ingest" | "query";
 export type MixedOutcome =
   | { kind: "answered"; answer: string; citations: string[]; savedPath: string }
   | { kind: "cancelled"; phase: MixedPhase }
-  | { kind: "failed"; phase: MixedPhase; reason: string }
+  | { kind: "failed"; phase: MixedPhase; reason: string; savedPath?: string }
   | { kind: "validation_failed"; answer: string; savedPath: string };
 
 export interface MixedOrchestratorDeps {
@@ -45,6 +45,12 @@ export interface MixedOrchestratorDeps {
   ingestSignal?: AbortSignal;
   /** Signal for the query phase only. Aborting preserves the saved note. */
   querySignal?: AbortSignal;
+  /**
+   * Called after ingest succeeds and before query starts, with the path of
+   * the saved note. Lets callers record the path so they can inform the user
+   * even if the query phase throws unexpectedly.
+   */
+  onIngestComplete?: (savedPath: string) => void;
 }
 
 /**
@@ -63,6 +69,7 @@ export async function runMixed(
   deps: MixedOrchestratorDeps,
 ): Promise<MixedOutcome> {
   const turnId = deps.turnId ?? crypto.randomUUID();
+  const onStateChange = deps.onStateChange;
 
   const ingestLog = deps.eventLog ? new PhaseEventLog(deps.eventLog, "ingest") : undefined;
 
@@ -80,8 +87,8 @@ export async function runMixed(
       preview: deps.preview,
       eventLog: ingestLog,
       turnId,
-      onStateChange: deps.onStateChange
-        ? (state, label) => deps.onStateChange!(state, label, "ingest")
+      onStateChange: onStateChange
+        ? (state, label) => onStateChange(state, label, "ingest")
         : undefined,
       inboxFolder: deps.inboxFolder,
       dedupThreshold: deps.dedupThreshold,
@@ -101,12 +108,14 @@ export async function runMixed(
     ingestOutcome.kind === "saved" || ingestOutcome.kind === "skipped_existing"
       ? ingestOutcome.path
       : ingestOutcome.kind === "split_saved"
-        ? (ingestOutcome.paths[0] ?? "")
+        ? (ingestOutcome.paths[0] ?? "(split into multiple notes)")
         : "";
+
+  deps.onIngestComplete?.(savedPath);
 
   // ── QUERY PHASE ───────────────────────────────────────────────────────
   if (deps.querySignal?.aborted) {
-    return { kind: "failed", phase: "query", reason: "aborted" };
+    return { kind: "failed", phase: "query", reason: "aborted", savedPath };
   }
 
   const queryLog = deps.eventLog ? new PhaseEventLog(deps.eventLog, "query") : undefined;
@@ -122,14 +131,14 @@ export async function runMixed(
       turnId,
       model: deps.model,
       signal: deps.querySignal,
-      onStateChange: deps.onStateChange
-        ? (state, label) => deps.onStateChange!(state, label, "query")
+      onStateChange: onStateChange
+        ? (state, label) => onStateChange(state, label, "query")
         : undefined,
     },
   );
 
   if (queryOutcome.kind === "failed") {
-    return { kind: "failed", phase: "query", reason: queryOutcome.reason };
+    return { kind: "failed", phase: "query", reason: queryOutcome.reason, savedPath };
   }
   if (queryOutcome.kind === "validation_failed") {
     return { kind: "validation_failed", answer: queryOutcome.answer, savedPath };
