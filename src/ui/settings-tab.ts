@@ -259,7 +259,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Developer mode")
-      .setDesc("Enables the Turn Inspector command in the command palette. Shows raw state traces with tool args, payloads, and per-step timing. Reload the plugin after toggling.")
+      .setDesc("Enables the Turn Inspector command in the command palette. Shows raw state traces with tool args, payloads, and per-step timing.")
       .addToggle((toggle) => {
         toggle.setValue(this.settings.devMode);
         toggle.onChange(async (value) => {

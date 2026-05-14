@@ -23,12 +23,12 @@ class TurnInspectorModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.style.maxWidth = "860px";
+    contentEl.style.maxWidth = "min(860px, 95vw)";
 
     contentEl.createEl("h2", { text: "Turn Inspector" });
 
     if (this.entries.length === 0) {
-      contentEl.createEl("p", { text: "No state entries recorded for this turn." });
+      contentEl.createEl("p", { text: "No state entries found. The event log is cleared on plugin reload — send a message first." });
       this.addCloseButton(contentEl);
       return;
     }
