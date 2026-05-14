@@ -11,7 +11,7 @@ import { runIngest } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
 import { createSynthesisNote } from "./services/synthesis-writer";
-import { dispatchToolCall, WRITE_TOOLS, type ToolDispatchDeps } from "./services/tool-dispatcher";
+import { dispatchToolCall, ALL_TOOLS, type ToolDispatchDeps } from "./services/tool-dispatcher";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
@@ -475,7 +475,7 @@ export class GemmeraChatView extends ItemView {
       const reply = await this.services.llm.chat({
         model: this.settings.chatModel,
         messages,
-        tools: [...WRITE_TOOLS],
+        tools: [...ALL_TOOLS],
         onToken: (token) => {
           textEl.textContent += token;
           this.scrollToBottom();
@@ -505,7 +505,10 @@ export class GemmeraChatView extends ItemView {
           try {
             const result = await dispatchToolCall(call, dispatchDeps);
             if (result.kind === "done") {
-              this.appendMessage("assistant", result.summary);
+              const msgEl = this.appendMessage("assistant", result.summary);
+              if (result.citations && result.citations.length > 0) {
+                this.renderCitationChips(msgEl, result.citations);
+              }
             } else if (result.kind === "unknown_tool") {
               this.appendMessage("assistant", `Unknown tool: ${call.name}`);
             }
@@ -733,7 +736,7 @@ export class GemmeraChatView extends ItemView {
     role: "user" | "assistant",
     text: string,
     decoration?: { badge: string | null; tooltip: string | null } | null,
-  ): void {
+  ): HTMLElement {
     const msg = this.messagesEl.createEl("div", { cls: `gemmera-message gemmera-message--${role}` });
     msg.createEl("span", { cls: "gemmera-message__role", text: role === "user" ? "Du" : "Gemma" });
     msg.createEl("p", { cls: "gemmera-message__text", text });
@@ -742,6 +745,7 @@ export class GemmeraChatView extends ItemView {
       if (decoration.tooltip) badge.setAttribute("title", decoration.tooltip);
     }
     this.scrollToBottom();
+    return msg;
   }
 
   private appendErrorMessage(err: unknown, onRetry: () => void): void {

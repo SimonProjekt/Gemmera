@@ -78,6 +78,18 @@ export async function dispatchToolCall(
         call.arguments as { question: string; answer: string; citations?: string[] },
         deps,
       );
+    // ── Read tools (#65) ──
+    case "search_notes":
+      return dispatchSearchNotes(
+        call.arguments as { query: string; top_k?: number },
+        deps,
+      );
+    case "get_note":
+      return dispatchGetNote(call.arguments as { path: string }, deps);
+    case "find_related_notes":
+      return dispatchFindRelated(call.arguments as { path: string }, deps);
+    case "list_folder":
+      return dispatchListFolder(call.arguments as { folder?: string }, deps);
     default:
       return { kind: "unknown_tool" };
   }
@@ -280,6 +292,94 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ── Read tool handlers (#65) ──────────────────────────────────────────────────
+
+async function dispatchSearchNotes(
+  args: { query: string; top_k?: number },
+  deps: ToolDispatchDeps,
+): Promise<ToolResult> {
+  const results = await deps.index.search(args.query, { topK: args.top_k ?? 5 });
+  if (results.length === 0) {
+    return { kind: "done", summary: `No notes found for "${args.query}".` };
+  }
+  const citations = results.map((r) => r.path);
+  const lines = results.map((r) => `- **${r.basename}**: ${r.snippet.slice(0, 80)}…`);
+  return {
+    kind: "done",
+    summary: `Found ${results.length} note(s) for "${args.query}":\n${lines.join("\n")}`,
+    citations,
+  };
+}
+
+async function dispatchGetNote(
+  args: { path: string },
+  deps: ToolDispatchDeps,
+): Promise<ToolResult> {
+  const exists = await deps.vault.exists(args.path);
+  if (!exists) {
+    return { kind: "cancelled", message: `Note not found: ${args.path}` };
+  }
+  const content = await deps.vault.read(args.path);
+  const max = 2000;
+  const truncated = content.length > max;
+  const visible = truncated
+    ? `${content.slice(0, max)}\n\n[...truncated at ${max} chars; full note is ${content.length} chars]`
+    : content;
+  return {
+    kind: "done",
+    summary: `Read **${args.path}**:\n\n${visible}`,
+    citations: [args.path],
+  };
+}
+
+async function dispatchFindRelated(
+  args: { path: string },
+  deps: ToolDispatchDeps,
+): Promise<ToolResult> {
+  const basename = args.path.split("/").pop()?.replace(/\.md$/, "") ?? args.path;
+  const lexicalName = basename.replace(/[_-]+/g, " ");
+  const exists = await deps.vault.exists(args.path);
+  const content = exists ? await deps.vault.read(args.path) : "";
+  const query = [lexicalName, content.slice(0, 500)].filter(Boolean).join("\n\n");
+  const results = await deps.index.search(query, { topK: 5 });
+  const related = results.filter((r) => r.path !== args.path);
+  if (related.length === 0) {
+    return { kind: "done", summary: `No related notes found for ${args.path}.` };
+  }
+  const citations = related.map((r) => r.path);
+  const lines = related.map((r) => `- **${r.basename}**`);
+  return {
+    kind: "done",
+    summary: `Notes related to **${basename}**:\n${lines.join("\n")}`,
+    citations,
+  };
+}
+
+async function dispatchListFolder(
+  args: { folder?: string },
+  deps: ToolDispatchDeps,
+): Promise<ToolResult> {
+  const files = await deps.vault.listMarkdownFiles();
+  const folder = args.folder ? (args.folder.endsWith("/") ? args.folder : args.folder + "/") : "";
+  const filtered = folder
+    ? files.filter((f) => f.path.startsWith(folder))
+    : files;
+
+  if (filtered.length === 0) {
+    return { kind: "done", summary: folder ? `No notes in ${folder}.` : "Vault is empty." };
+  }
+  const citations = filtered.map((f) => f.path);
+  const lines = filtered.slice(0, 20).map((f) => `- ${f.basename}`);
+  const suffix = filtered.length > 20 ? `\n…and ${filtered.length - 20} more` : "";
+  return {
+    kind: "done",
+    summary: `${filtered.length} note(s) in ${folder || "vault"}:\n${lines.join("\n")}${suffix}`,
+    citations,
+  };
+}
+
+// ── Tool definitions (for LLMService.chat) ────────────────────────────────────
+
 export const SAVE_NOTE_TOOL = {
   name: "save_note",
   description: "Create or append to a note in the vault.",
@@ -353,3 +453,54 @@ export const WRITE_TOOLS = [
   DELETE_TOOL,
   SYNTHESIS_TOOL,
 ] as const;
+
+export const SEARCH_NOTES_TOOL = {
+  name: "search_notes",
+  description: "Full-text search across the vault. Returns scored results with snippets.",
+  parameters: {
+    type: "object",
+    required: ["query"],
+    properties: {
+      query: { type: "string" },
+      top_k: { type: "number", description: "Max results to return (default 5)" },
+    },
+  },
+} as const;
+
+export const GET_NOTE_TOOL = {
+  name: "get_note",
+  description: "Read the full content of a note by path.",
+  parameters: {
+    type: "object",
+    required: ["path"],
+    properties: { path: { type: "string" } },
+  },
+} as const;
+
+export const FIND_RELATED_TOOL = {
+  name: "find_related_notes",
+  description: "Find notes semantically related to the given note path.",
+  parameters: {
+    type: "object",
+    required: ["path"],
+    properties: { path: { type: "string" } },
+  },
+} as const;
+
+export const LIST_FOLDER_TOOL = {
+  name: "list_folder",
+  description: "List all Markdown notes in a vault folder (or the whole vault).",
+  parameters: {
+    type: "object",
+    properties: { folder: { type: "string", description: "Folder path, e.g. 'Inbox/'" } },
+  },
+} as const;
+
+export const READ_TOOLS = [
+  SEARCH_NOTES_TOOL,
+  GET_NOTE_TOOL,
+  FIND_RELATED_TOOL,
+  LIST_FOLDER_TOOL,
+] as const;
+
+export const ALL_TOOLS = [...WRITE_TOOLS, ...READ_TOOLS] as const;
