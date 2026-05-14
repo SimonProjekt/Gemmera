@@ -19,6 +19,7 @@ export interface VaultService {
   read(path: string): Promise<string>;
   exists(path: string): Promise<boolean>;
   create(path: string, content: string): Promise<void>;
+  modify(path: string, content: string): Promise<void>;
   append(path: string, content: string): Promise<void>;
   getHeadings(path: string): Promise<HeadingRef[]>;
   /**

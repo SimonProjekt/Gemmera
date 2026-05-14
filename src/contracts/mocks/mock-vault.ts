@@ -32,6 +32,11 @@ export class MockVaultService implements VaultService {
     this.files.set(path, content);
   }
 
+  async modify(path: string, content: string): Promise<void> {
+    if (!this.files.has(path)) throw new Error(`File not found: ${path}`);
+    this.files.set(path, content);
+  }
+
   /** Test-only convenience: overwrite an existing file or create a new one. */
   setFile(path: string, content: string): void {
     this.files.set(path, content);

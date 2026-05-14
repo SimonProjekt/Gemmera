@@ -26,6 +26,11 @@ export class ObsidianVaultService implements VaultService {
     await this.app.vault.create(path, content);
   }
 
+  async modify(path: string, content: string): Promise<void> {
+    const file = this.requireFile(path);
+    await this.app.vault.modify(file, content);
+  }
+
   async append(path: string, content: string): Promise<void> {
     const file = this.requireFile(path);
     await this.app.vault.append(file, content);
