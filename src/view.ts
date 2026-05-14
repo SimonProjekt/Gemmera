@@ -20,6 +20,7 @@ import { buildMessageDecoration } from "./message-decoration";
 import { showSaveUndoNotice } from "./notices";
 import { labelForState } from "./services/turn-status";
 import { CitationChipRow } from "./ui/citation-chips";
+import { openTurnInspector } from "./ui/turn-inspector";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -41,6 +42,7 @@ export class GemmeraChatView extends ItemView {
   private currentSessionId: string | null = null;
   private escCleared = false;
   private prefersReducedMotion = false;
+  private lastTurnId: string | undefined;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -176,6 +178,7 @@ export class GemmeraChatView extends ItemView {
     this.setInputDisabled(true);
 
     const turnId = crypto.randomUUID();
+    this.lastTurnId = turnId;
 
     // ── Classify ──────────────────────────────────────────────────────
     let route: RouteDecision | null = null;
@@ -754,6 +757,15 @@ export class GemmeraChatView extends ItemView {
     }
 
     this.scrollToBottom();
+  }
+
+  async openTurnInspector(): Promise<void> {
+    if (!this.lastTurnId) {
+      new Notice("Gemmera: No turn recorded yet — send a message first.");
+      return;
+    }
+    const rawEntries = await this.services.eventLog.eventsFor(this.lastTurnId);
+    openTurnInspector(this.app, rawEntries);
   }
 }
 

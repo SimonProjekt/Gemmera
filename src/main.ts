@@ -113,6 +113,24 @@ export default class GemmeraPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "open-turn-inspector",
+      name: "Turn Inspector — view last turn trace",
+      checkCallback: (checking: boolean) => {
+        if (!this.settings.devMode) return false;
+        if (!checking) {
+          const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+          const view = leaves[0]?.view as GemmeraChatView | undefined;
+          if (view) {
+            view.openTurnInspector();
+          } else {
+            new Notice("Gemmera: Open the chat panel first.");
+          }
+        }
+        return true;
+      },
+    });
+
+    this.addCommand({
       id: "capture-selection",
       name: "Gemmera: Fånga markering",
       hotkeys: [{ modifiers: ["Ctrl", "Shift"], key: "C" }],

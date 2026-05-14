@@ -48,6 +48,13 @@ export interface GemmeraSettings {
 
   /** Ollama tag used for chat and the classifier (e.g. `gemma4:e4b`). */
   chatModel: string;
+
+  /**
+   * When true, the "Open turn inspector" command appears in the palette.
+   * Shows raw state traces with tool args, payloads, and per-step timing.
+   * Intended for developers; hidden by default in production.
+   */
+  devMode: boolean;
 }
 
 export const DEFAULT_CHAT_MODEL = "gemma4:e4b";
@@ -62,4 +69,5 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   ollamaPath: "",
   turnTimeoutMs: 120_000,
   chatModel: DEFAULT_CHAT_MODEL,
+  devMode: false,
 };
