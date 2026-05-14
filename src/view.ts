@@ -140,7 +140,7 @@ export class GemmeraChatView extends ItemView {
     });
 
     this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
-    this.historyDrawerEl = this.contextPanelEl;
+    this.historyDrawerEl = this.contextPanelEl.createEl("div", { cls: "gemmera-history" });
 
     const adapter = this.app.vault.adapter as FileSystemAdapter;
     const historyPath = adapter.getFullPath(".coworkmd/chats.json");
@@ -149,8 +149,8 @@ export class GemmeraChatView extends ItemView {
     // panel without sending anything doesn't accumulate empty rows in chats.json.
 
     // Prune stale sessions on open, then render the drawer.
-    this.chatHistory.pruneIfNeeded().catch(() => {}).finally(() => {
-      this.renderHistoryDrawer().catch(() => {});
+    this.chatHistory.pruneIfNeeded().catch((err) => console.error("[gemmera] pruneIfNeeded:", err)).finally(() => {
+      this.renderHistoryDrawer().catch((err) => console.error("[gemmera] renderHistoryDrawer:", err));
     });
   }
 
@@ -598,14 +598,14 @@ export class GemmeraChatView extends ItemView {
         attr: { tabindex: "0", role: "button", "aria-pressed": String(isActive) },
       });
       item.createEl("span", { cls: "gemmera-history__item-title", text: session.title });
-      const meta = formatSessionMeta(session.updatedAt, session.turns.length);
+      const meta = formatSessionMeta(session.updatedAt, session.turns.filter((t) => t.role === "user").length);
       item.createEl("span", { cls: "gemmera-history__item-meta", text: meta });
 
-      item.addEventListener("click", () => this.switchToSession(session).catch(() => {}));
+      item.addEventListener("click", () => this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err)));
       item.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          this.switchToSession(session).catch(() => {});
+          this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err));
         }
       });
     }
@@ -622,6 +622,7 @@ export class GemmeraChatView extends ItemView {
     session: import("./services/chat-history").ChatSession,
   ): Promise<void> {
     this.currentSessionId = session.id;
+    this.recentTurns = [];
     this.history = session.turns.map((t) => ({ role: t.role, content: t.content }));
     this.messagesEl.empty();
     for (const turn of session.turns) {
@@ -904,7 +905,7 @@ export function withContext(
 }
 
 function formatSessionMeta(updatedAt: number, turnCount: number): string {
-  const turns = Math.floor(turnCount / 2);
+  const turns = turnCount;
   const date = new Date(updatedAt).toLocaleDateString("sv-SE", {
     month: "short",
     day: "numeric",
