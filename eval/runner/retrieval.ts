@@ -37,6 +37,7 @@ import { InMemoryLinksIndex } from "../../src/services/in-memory-links-index";
 import { IngestionRunner } from "../../src/services/ingestion-runner";
 import { LinksIndexService } from "../../src/services/links-index-service";
 import { MarkdownChunker } from "../../src/services/markdown-chunker";
+import { DefaultPayloadAssembler } from "../../src/services/payload-assembler";
 import { loadFixtureVault, loadShard, SHARDS, type GoldenExample, type ShardName } from "../retrieval-golden/loader";
 
 // ─── CLI ──────────────────────────────────────────────────────────────
@@ -107,6 +108,9 @@ function dot(a: Float32Array, b: Float32Array): number {
 
 interface Pipeline {
   retriever: HybridRetriever;
+  assembler: DefaultPayloadAssembler;
+  /** Source-of-truth file contents — for citation verification. */
+  files: Record<string, string>;
 }
 
 const pipelineCache = new Map<string, Promise<Pipeline>>();
@@ -147,7 +151,8 @@ async function buildPipeline(vaultName: string): Promise<Pipeline> {
   await linksSvc.flush();
 
   const retriever = new HybridRetriever(embedder, vectorStore, bm25, links, store);
-  return { retriever };
+  const assembler = new DefaultPayloadAssembler(links);
+  return { retriever, assembler, files };
 }
 
 // ─── Metrics ──────────────────────────────────────────────────────────
@@ -169,6 +174,12 @@ interface QuestionResult {
   reciprocalRank: number;
   /** Wall-clock retrieval time in ms. */
   latencyMs: number;
+  /** Wall-clock payload-assembly time in ms. */
+  payloadLatencyMs: number;
+  /** 1 if every payload chunk's path exists AND its text is verbatim in the source file. */
+  citationCorrectness: number;
+  /** Failing chunk indices for the report. Empty when citationCorrectness === 1. */
+  citationFailures: Array<{ idx: number; reason: string; path: string }>;
 }
 
 function uniquePaths(hits: RetrievalHit[]): string[] {
@@ -201,10 +212,29 @@ async function runExample(
   shard: ShardName,
   ex: GoldenExample,
 ): Promise<QuestionResult> {
-  const { retriever } = await pipelineFor(ex.fixtureVault);
+  const { retriever, assembler, files } = await pipelineFor(ex.fixtureVault);
   const t0 = performance.now();
   const hits = await retriever.retrieve(ex.question, { topK: CANDIDATE_K });
   const latencyMs = performance.now() - t0;
+
+  const t1 = performance.now();
+  const payload = assembler.assemble(ex.question, hits.slice(0, TOP_K));
+  const payloadLatencyMs = performance.now() - t1;
+
+  const citationFailures: QuestionResult["citationFailures"] = [];
+  for (let i = 0; i < payload.chunks.length; i++) {
+    const c = payload.chunks[i];
+    const source = files[c.path];
+    if (source === undefined) {
+      citationFailures.push({ idx: i, reason: "path not in vault", path: c.path });
+      continue;
+    }
+    if (!source.includes(c.text.trim())) {
+      citationFailures.push({ idx: i, reason: "chunk text not in source", path: c.path });
+    }
+  }
+  const citationCorrectness =
+    payload.chunks.length === 0 ? 1 : citationFailures.length === 0 ? 1 : 0;
 
   const candidatePaths = uniquePaths(hits);
   const retrievedPaths = candidatePaths.slice(0, TOP_K);
@@ -240,6 +270,9 @@ async function runExample(
     recallAt30: recall(candidatePaths, ex.idealNotePaths),
     reciprocalRank,
     latencyMs,
+    payloadLatencyMs,
+    citationCorrectness,
+    citationFailures,
   };
 }
 
@@ -295,9 +328,15 @@ function report(results: QuestionResult[]): void {
   const meanRecall10 = mean(results.map((r) => r.recallAt10));
   const meanRecall30 = mean(results.map((r) => r.recallAt30));
   const meanMRR = mean(results.map((r) => r.reciprocalRank));
+  const meanCitationCorrectness = mean(results.map((r) => r.citationCorrectness));
   const latencies = results.map((r) => r.latencyMs).sort((a, b) => a - b);
+  const payloadLatencies = results.map((r) => r.payloadLatencyMs).sort((a, b) => a - b);
   const p50 = percentile(latencies, 50);
   const p95 = percentile(latencies, 95);
+  const payloadP50 = percentile(payloadLatencies, 50);
+  const e2eLatencies = results.map((r) => r.latencyMs + r.payloadLatencyMs).sort((a, b) => a - b);
+  const e2eP50 = percentile(e2eLatencies, 50);
+  const e2eP95 = percentile(e2eLatencies, 95);
 
   const byShard = new Map<ShardName, QuestionResult[]>();
   for (const r of results) {
@@ -316,7 +355,11 @@ function report(results: QuestionResult[]): void {
     `**Recall@${TOP_K}:** ${pct(meanRecall10)}  `,
     `**Recall@${CANDIDATE_K}:** ${pct(meanRecall30)}  `,
     `**MRR:** ${meanMRR.toFixed(3)}  `,
-    `**Latency P50/P95:** ${p50.toFixed(1)}ms / ${p95.toFixed(1)}ms`,
+    `**Citation correctness:** ${pct(meanCitationCorrectness)}  `,
+    `**Retrieval P50/P95:** ${p50.toFixed(1)}ms / ${p95.toFixed(1)}ms  `,
+    `**End-to-end P50/P95:** ${e2eP50.toFixed(1)}ms / ${e2eP95.toFixed(1)}ms`,
+    "",
+    `_Rule-based faithfulness (every cited chunk lands in the retrieval payload) is deferred until the query tool loop wraps its LLM-driven citation output; the LLM-judge version is v2 per planning/rag.md §Evaluation._`,
     "",
     "## Per-shard",
     "",
@@ -346,7 +389,7 @@ function report(results: QuestionResult[]): void {
 
   const failures = results.filter((r) => r.recallAt10 < 1);
   if (failures.length > 0) {
-    md.push("", "## Misses", "");
+    md.push("", "## Recall misses", "");
     for (const f of failures) {
       md.push(
         `**${f.id}** (${f.shard}) — recall@10 ${pct(f.recallAt10)}, recall@30 ${pct(f.recallAt30)}, MRR ${f.reciprocalRank.toFixed(3)}  `,
@@ -358,6 +401,16 @@ function report(results: QuestionResult[]): void {
     }
   }
 
+  const citationBroken = results.filter((r) => r.citationCorrectness < 1);
+  if (citationBroken.length > 0) {
+    md.push("", "## Citation failures", "");
+    for (const f of citationBroken) {
+      for (const cf of f.citationFailures) {
+        md.push(`**${f.id}** chunk ${cf.idx} (${cf.path}): ${cf.reason}`);
+      }
+    }
+  }
+
   const json = {
     timestamp: new Date().toISOString(),
     mode: "mock",
@@ -365,7 +418,14 @@ function report(results: QuestionResult[]): void {
     recallAt10: meanRecall10,
     recallAt30: meanRecall30,
     mrr: meanMRR,
-    latency: { p50, p95, min: latencies[0] ?? 0, max: latencies[latencies.length - 1] ?? 0 },
+    citationCorrectness: meanCitationCorrectness,
+    latency: {
+      retrievalP50: p50,
+      retrievalP95: p95,
+      payloadP50,
+      endToEndP50: e2eP50,
+      endToEndP95: e2eP95,
+    },
     signalBreakdown: breakdown,
     perShard: Object.fromEntries(
       [...byShard.entries()].map(([s, rs]) => {
@@ -392,9 +452,9 @@ function report(results: QuestionResult[]): void {
   console.log(`Results → ${outDir}/`);
   console.log(`Examples: ${total}`);
   console.log(
-    `Recall@${TOP_K}: ${pct(meanRecall10)}  Recall@${CANDIDATE_K}: ${pct(meanRecall30)}  MRR: ${meanMRR.toFixed(3)}`,
+    `Recall@${TOP_K}: ${pct(meanRecall10)}  Recall@${CANDIDATE_K}: ${pct(meanRecall30)}  MRR: ${meanMRR.toFixed(3)}  Cite: ${pct(meanCitationCorrectness)}`,
   );
-  console.log(`P50: ${p50.toFixed(1)}ms  P95: ${p95.toFixed(1)}ms`);
+  console.log(`Retrieval P50/P95: ${p50.toFixed(1)}ms / ${p95.toFixed(1)}ms   E2E P50/P95: ${e2eP50.toFixed(1)}ms / ${e2eP95.toFixed(1)}ms`);
   if (failures.length > 0) {
     console.log(`\nMisses (${failures.length}):`);
     for (const f of failures) {
