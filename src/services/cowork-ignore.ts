@@ -16,10 +16,7 @@ export const DEFAULT_COWORKIGNORE = [
 ].join("\n");
 
 interface Rule {
-  pattern: string;
   negated: boolean;
-  isDirPattern: boolean;
-  /** Compiled regex for non-directory patterns. */
   regex: RegExp;
 }
 
@@ -33,22 +30,22 @@ function parseRule(raw: string): Rule | null {
   const isDirPattern = pattern.endsWith("/");
   if (isDirPattern) pattern = pattern.slice(0, -1);
 
-  const regex = buildRegex(pattern);
-  return { pattern, negated, isDirPattern, regex };
+  return { negated, regex: buildRegex(pattern, isDirPattern) };
 }
 
-function buildRegex(pattern: string): RegExp {
-  // A leading "/" is stripped (anchors to root in gitignore — same as having a slash)
-  const stripped = pattern.startsWith("/") ? pattern.slice(1) : pattern;
-  const hasSlash = stripped.includes("/");
-  const regexBody = globToRegexBody(stripped);
-
-  if (hasSlash) {
-    // Anchored to root
-    return new RegExp("^" + regexBody + "$");
-  }
-  // Unanchored: match at any depth against the path
-  return new RegExp("(^|/)" + regexBody + "$");
+// Gitignore semantics:
+//   - leading "/" or any internal "/" → anchored to vault root
+//   - otherwise → unanchored, matches at any depth
+//   - trailing "/" (dir pattern) also matches everything beneath the directory
+function buildRegex(pattern: string, isDirPattern: boolean): RegExp {
+  const leadingSlash = pattern.startsWith("/");
+  const stripped = leadingSlash ? pattern.slice(1) : pattern;
+  const anchored = leadingSlash || stripped.includes("/");
+  const body = globToRegexBody(stripped);
+  const tail = isDirPattern ? "(?:/.*)?" : "";
+  return anchored
+    ? new RegExp("^" + body + tail + "$")
+    : new RegExp("(?:^|/)" + body + tail + "$");
 }
 
 function globToRegexBody(pattern: string): string {
@@ -77,13 +74,6 @@ function globToRegexBody(pattern: string): string {
   return result;
 }
 
-function testRule(rule: Rule, path: string): boolean {
-  if (rule.isDirPattern) {
-    return path === rule.pattern || path.startsWith(rule.pattern + "/");
-  }
-  return rule.regex.test(path);
-}
-
 /**
  * Parses a `.coworkignore` file and implements `UserIgnoreMatcher`.
  * Evaluation is last-match-wins, consistent with gitignore. Hard-coded
@@ -107,7 +97,7 @@ export class CoworkIgnore implements UserIgnoreMatcher {
 
     let ignored = false;
     for (const rule of this.rules) {
-      if (testRule(rule, path)) {
+      if (rule.regex.test(path)) {
         ignored = !rule.negated;
       }
     }

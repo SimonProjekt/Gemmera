@@ -13,6 +13,12 @@ describe("CoworkIgnore — parsing", () => {
     const ig = new CoworkIgnore("# this is a comment\n  # also a comment");
     expect(ig.matches("Notes/foo.md")).toBe(false);
   });
+
+  it("tolerates CRLF line endings", () => {
+    const ig = new CoworkIgnore("Templates/\r\n*.canvas\r\n");
+    expect(ig.matches("Templates/x.md")).toBe(true);
+    expect(ig.matches("diagram.canvas")).toBe(true);
+  });
 });
 
 // ── Folder patterns ───────────────────────────────────────────────────────────
@@ -32,6 +38,33 @@ describe("CoworkIgnore — folder patterns (trailing /)", () => {
   it("does not ignore files in other folders", () => {
     expect(ig.matches("Notes/foo.md")).toBe(false);
     expect(ig.matches("NotTemplates/foo.md")).toBe(false);
+  });
+
+  it("matches at any depth when pattern has no internal slash (gitignore semantics)", () => {
+    expect(ig.matches("Sub/Templates/x.md")).toBe(true);
+    expect(ig.matches("a/b/Templates/x.md")).toBe(true);
+    expect(ig.matches("a/b/Templates")).toBe(true);
+  });
+});
+
+describe("CoworkIgnore — anchored folder patterns", () => {
+  it("leading slash anchors to vault root", () => {
+    const ig = new CoworkIgnore("/Templates/");
+    expect(ig.matches("Templates/x.md")).toBe(true);
+    expect(ig.matches("Sub/Templates/x.md")).toBe(false);
+  });
+
+  it("internal slash anchors to vault root", () => {
+    const ig = new CoworkIgnore("Archive/2024/");
+    expect(ig.matches("Archive/2024/x.md")).toBe(true);
+    expect(ig.matches("Outer/Archive/2024/x.md")).toBe(false);
+  });
+
+  it("glob folder pattern works at any depth", () => {
+    const ig = new CoworkIgnore("Draft-*/");
+    expect(ig.matches("Draft-2024/x.md")).toBe(true);
+    expect(ig.matches("Sub/Draft-2024/x.md")).toBe(true);
+    expect(ig.matches("DraftX/x.md")).toBe(false);
   });
 });
 

@@ -1,5 +1,5 @@
 import { FileSystemAdapter, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, watch as fsWatch } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { OllamaLifecycle, type OllamaStatus } from "./services/ollama-lifecycle";
@@ -42,18 +42,7 @@ export default class GemmeraPlugin extends Plugin {
     // process jobs the user expected to stay paused.
     await this.services.runnerControls.applyPersistedState();
     this.services.eventBridge.start();
-    // Reload .coworkignore rules whenever the file is saved, so the user does
-    // not need to restart Obsidian after editing it.
-    this.registerEvent(
-      this.app.vault.on("modify", async (file) => {
-        if (file.path === ".coworkignore") {
-          try {
-            const content = await this.app.vault.adapter.read(".coworkignore");
-            this.services.coworkIgnore.reload(content);
-          } catch { /* file removed; keep current rules */ }
-        }
-      }),
-    );
+    this.registerCoworkIgnoreReload();
     this.services.ingestionRunner.start();
     this.services.embeddingService.start();
     this.services.bm25IndexService.start();
@@ -115,6 +104,12 @@ export default class GemmeraPlugin extends Plugin {
       id: "open-chat",
       name: "Öppna chatt",
       callback: () => this.openChatView(),
+    });
+
+    this.addCommand({
+      id: "reload-coworkignore",
+      name: "Gemmera: Reload .coworkignore",
+      callback: () => { void this.reloadCoworkIgnore(); },
     });
 
     this.addCommand({
@@ -317,6 +312,38 @@ export default class GemmeraPlugin extends Plugin {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     const view = leaves[0]?.view as GemmeraChatView | undefined;
     view?.setComposerText(text);
+  }
+
+  private async reloadCoworkIgnore(): Promise<void> {
+    try {
+      const content = await this.app.vault.adapter.read(".coworkignore");
+      this.services.coworkIgnore.reload(content);
+    } catch {
+      // File removed — keep current rules.
+    }
+  }
+
+  // Obsidian's Vault hides root-level dotfiles, so `vault.on("modify")` never
+  // fires for `.coworkignore`. Watch the vault root via fs and filter by name;
+  // parent-dir watch (vs. file watch) survives editors that save atomically by
+  // replacing the inode.
+  private registerCoworkIgnoreReload(): void {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) return;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const watcher = fsWatch(adapter.getBasePath(), { persistent: false }, (_event, filename) => {
+      // Some Linux FSes (FUSE, certain NFS configs) pass null filename on
+      // `change` events. Treat null as "could be ours" — reload is cheap,
+      // debounced, and idempotent, so a few unrelated wake-ups are fine.
+      if (filename !== null && filename !== ".coworkignore") return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => { void this.reloadCoworkIgnore(); }, 200);
+    });
+    watcher.on("error", (err) => console.error("[gemmera] .coworkignore watcher error", err));
+    this.register(() => {
+      if (debounce) clearTimeout(debounce);
+      watcher.close();
+    });
   }
 
   private async reindexNote(file: TFile): Promise<void> {
