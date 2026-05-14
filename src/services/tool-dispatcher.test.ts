@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MockVaultService } from "../contracts/mocks/mock-vault";
-import { dispatchToolCall, buildFrontmatter, appendUnderDatedSection, patchFrontmatter, type ToolDispatchDeps } from "./tool-dispatcher";
+import { dispatchToolCall, appendUnderDatedSection, patchFrontmatter, type ToolDispatchDeps } from "./tool-dispatcher";
 import { InMemoryJobQueue } from "./in-memory-job-queue";
 import { IngestWriter } from "./ingest-writer";
 
@@ -22,13 +22,23 @@ function makeDeps(overrides: Partial<ToolDispatchDeps> = {}): ToolDispatchDeps {
   };
 }
 
+const fullConfirm = {
+  confirmed: true as const,
+  title: "Dogs",
+  folder: "Inbox/",
+  tags: [],
+  aliases: [],
+  type: "source" as const,
+  status: "inbox" as const,
+  summary: "Notes on dogs.",
+};
+
 describe("dispatchToolCall — routing", () => {
   it("routes save_note with mode=create to save handler", async () => {
-    const confirmResult = { confirmed: true as const, title: "Dogs", folder: "Inbox/", tags: [] };
-    const deps = makeDeps({ openNotePreview: vi.fn().mockResolvedValue(confirmResult) });
+    const deps = makeDeps({ openNotePreview: vi.fn().mockResolvedValue(fullConfirm) });
 
     const result = await dispatchToolCall(
-      { id: "1", name: "save_note", arguments: { mode: "create", title: "Dogs", body_markdown: "Dogs are great." } },
+      { id: "1", name: "save_note", arguments: { mode: "create", title: "Dogs", body_markdown: "Dogs are great.", summary: "Notes on dogs." } },
       deps,
     );
 
@@ -73,6 +83,46 @@ describe("dispatchToolCall — routing", () => {
   });
 });
 
+describe("dispatchSaveCreate — schema compliance (#52 review)", () => {
+  it("emits all required rag.md frontmatter keys even when arrays are empty", async () => {
+    const vault = new MockVaultService();
+    const deps = makeDeps({ vault, openNotePreview: vi.fn().mockResolvedValue(fullConfirm) });
+
+    await dispatchToolCall(
+      { id: "1", name: "save_note", arguments: { mode: "create", title: "Dogs", body_markdown: "body", summary: "Notes on dogs." } },
+      deps,
+    );
+
+    const content = await vault.read("Inbox/Dogs.md");
+    // All 12 schema keys must appear. Arrays must render as `[]` (not be omitted).
+    for (const key of ["title:", "type:", "status:", "source:", "tags: []", "aliases: []", "entities: []", "related: []", "summary:", "cowork:"]) {
+      expect(content).toContain(key);
+    }
+    // Nested cowork keys.
+    for (const key of ["  source:", "  run_id:", "  model:", "  version:", "  confidence:"]) {
+      expect(content).toContain(key);
+    }
+  });
+
+  it("stamps cowork.model from deps.chatModel and a tool-call run_id", async () => {
+    const vault = new MockVaultService();
+    const deps = makeDeps({
+      vault,
+      chatModel: "gemma4:e4b",
+      openNotePreview: vi.fn().mockResolvedValue(fullConfirm),
+    });
+
+    await dispatchToolCall(
+      { id: "1", name: "save_note", arguments: { mode: "create", title: "Dogs", summary: "Notes." } },
+      deps,
+    );
+
+    const content = await vault.read("Inbox/Dogs.md");
+    expect(content).toContain('model: "gemma4:e4b"');
+    expect(content).toMatch(/run_id: "tool-call-\d+"/);
+  });
+});
+
 describe("appendUnderDatedSection", () => {
   it("adds today's heading when the note lacks one", () => {
     const updated = appendUnderDatedSection("Existing", "New entry", new Date("2026-05-14T12:00:00Z"));
@@ -100,11 +150,10 @@ describe("patchFrontmatter", () => {
 describe("dispatchToolCall — collision handling", () => {
   it("suffixes (2) when the base path already exists", async () => {
     const vault = new MockVaultService({ "Inbox/Dogs.md": "existing" });
-    const confirmResult = { confirmed: true as const, title: "Dogs", folder: "Inbox/", tags: [] };
-    const deps = makeDeps({ vault, openNotePreview: vi.fn().mockResolvedValue(confirmResult) });
+    const deps = makeDeps({ vault, openNotePreview: vi.fn().mockResolvedValue(fullConfirm) });
 
     const result = await dispatchToolCall(
-      { id: "5", name: "save_note", arguments: { mode: "create", title: "Dogs", body_markdown: "" } },
+      { id: "5", name: "save_note", arguments: { mode: "create", title: "Dogs", body_markdown: "", summary: "Notes on dogs." } },
       deps,
     );
 
@@ -142,27 +191,5 @@ describe("dispatchToolCall — read tools", () => {
     expect(result.kind).toBe("done");
     expect(search).toHaveBeenCalledWith(expect.stringContaining("vandringsnoter sundsvall harnosand"), { topK: 5 });
     expect(search).toHaveBeenCalledWith(expect.stringContaining("Bridge route"), { topK: 5 });
-  });
-});
-
-describe("buildFrontmatter", () => {
-  it("wraps title in double-quotes (valid YAML)", () => {
-    const fm = buildFrontmatter("Hello world", []);
-    expect(fm).toContain('title: "Hello world"');
-  });
-
-  it("escapes quotes inside title", () => {
-    const fm = buildFrontmatter('Title with "quotes"', []);
-    expect(fm).toContain('title: "Title with \\"quotes\\""');
-  });
-
-  it("omits tags line when tags array is empty", () => {
-    const fm = buildFrontmatter("My note", []);
-    expect(fm).not.toContain("tags:");
-  });
-
-  it("includes quoted tags when provided", () => {
-    const fm = buildFrontmatter("My note", ["rust", "cli"]);
-    expect(fm).toContain('tags: ["rust", "cli"]');
   });
 });

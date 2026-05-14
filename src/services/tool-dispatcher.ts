@@ -3,12 +3,13 @@ import type {
   JobQueue,
   LLMToolCall,
   LinksIndex,
+  NoteSpec,
   VaultService,
 } from "../contracts";
-import type { IngestWriter } from "./ingest-writer";
+import { composeFile, type IngestWriter } from "./ingest-writer";
 import { runDestructiveOp } from "./destructive-op-machine";
 import { createSynthesisNote } from "./synthesis-writer";
-import type { NotePreviewResult } from "../ui/note-preview-modal";
+import type { NotePreviewOpts, NotePreviewResult } from "../ui/note-preview-modal";
 
 export interface ToolDispatchDeps {
   vault: VaultService;
@@ -21,12 +22,7 @@ export interface ToolDispatchDeps {
   /** Model tag, used when creating synthesis notes. */
   chatModel: string;
   /** UI callback: note preview modal for create. Returns null on cancel. */
-  openNotePreview: (opts: {
-    title: string;
-    body: string;
-    folder: string;
-    tags: string[];
-  }) => Promise<NotePreviewResult | null>;
+  openNotePreview: (opts: NotePreviewOpts) => Promise<NotePreviewResult | null>;
   /**
    * UI callback: mandatory delete confirmation (non-overridable).
    * Resolves "confirmed" or "cancelled".
@@ -96,7 +92,12 @@ export async function dispatchToolCall(
 }
 
 async function dispatchSaveCreate(
-  args: { title?: string; body_markdown?: string; tags?: string[] },
+  args: {
+    title?: string;
+    body_markdown?: string;
+    tags?: string[];
+    summary?: string;
+  },
   deps: ToolDispatchDeps,
 ): Promise<ToolResult> {
   const result = await deps.openNotePreview({
@@ -104,6 +105,7 @@ async function dispatchSaveCreate(
     body: args.body_markdown ?? "",
     folder: deps.inboxFolder,
     tags: args.tags ?? [],
+    summary: args.summary ?? "",
   });
 
   if (!result) {
@@ -115,10 +117,33 @@ async function dispatchSaveCreate(
   const safeName = result.title.replace(/[\\/:*?"<>|]/g, "_");
   const path = await findUniquePath(deps.vault, folder, safeName);
 
-  const frontmatter = buildFrontmatter(result.title, result.tags);
-  const content = `${frontmatter}\n${args.body_markdown ?? ""}`;
+  // Build a complete NoteSpec satisfying frontmatter.schema.json. Routing
+  // through `composeFile` (the same serializer the ingest pipeline uses)
+  // guarantees every required key is emitted — `tags` / `aliases` /
+  // `entities` / `related` always render as `[]` rather than being omitted
+  // when empty, and `cowork` is stamped consistently with synthesis notes.
+  const spec: NoteSpec = {
+    title: result.title,
+    type: result.type,
+    tags: result.tags,
+    aliases: result.aliases,
+    source: "manual",
+    entities: [],
+    related: [],
+    status: result.status,
+    summary: result.summary,
+    key_points: [],
+    body_markdown: args.body_markdown ?? "",
+    cowork: {
+      source: "synthesis",
+      run_id: `tool-call-${Date.now()}`,
+      model: deps.chatModel,
+      version: "0.0.1",
+      confidence: "medium",
+    },
+  };
 
-  await deps.vault.create(path, content);
+  await deps.vault.create(path, composeFile(spec));
   return { kind: "done", summary: `Saved **${result.title}** to ${path}` };
 }
 
@@ -230,16 +255,6 @@ async function findUniquePath(vault: VaultService, folder: string, name: string)
     if (!await vault.exists(candidate)) return candidate;
   }
   return `${folder}${name} (${Date.now()}).md`;
-}
-
-/** Build a YAML frontmatter block. Values use JSON-compatible YAML flow scalars. */
-export function buildFrontmatter(title: string, tags: string[]): string {
-  const lines = ["---", `title: ${yamlValue(title)}`];
-  if (tags.length > 0) {
-    lines.push(`tags: [${tags.map((t) => yamlValue(t)).join(", ")}]`);
-  }
-  lines.push("---");
-  return lines.join("\n");
 }
 
 export function appendUnderDatedSection(raw: string, body: string, now = new Date()): string {
@@ -392,6 +407,10 @@ export const SAVE_NOTE_TOOL = {
       path: { type: "string", description: "Existing note path (mode=append)" },
       body_markdown: { type: "string", description: "Note body in Markdown" },
       tags: { type: "array", items: { type: "string" } },
+      summary: {
+        type: "string",
+        description: "1–2 sentence summary for the frontmatter (mode=create). The user can edit before saving; required field — prompted in the modal if empty.",
+      },
     },
   },
 } as const;

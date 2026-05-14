@@ -109,7 +109,7 @@ async function uniquePath(
  * its own frontmatter block (the parser strips it; we re-fail here as
  * defense in depth so a buggy parser cannot corrupt the file format).
  */
-function composeFile(spec: NoteSpec): string {
+export function composeFile(spec: NoteSpec): string {
   const body = spec.body_markdown ?? "";
   if (/^---\s*\r?\n/.test(body)) {
     throw new Error("body_markdown must not contain its own frontmatter block");
