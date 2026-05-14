@@ -11,9 +11,11 @@ import { runIngest } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
 import { createSynthesisNote } from "./services/synthesis-writer";
+import { dispatchToolCall, SAVE_NOTE_TOOL } from "./services/tool-dispatcher";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
+import { openNotePreview } from "./ui/note-preview-modal";
 import { buildMessageDecoration } from "./message-decoration";
 import { showSaveUndoNotice } from "./notices";
 import { labelForState } from "./services/turn-status";
@@ -468,12 +470,32 @@ export class GemmeraChatView extends ItemView {
       const reply = await this.services.llm.chat({
         model: this.settings.chatModel,
         messages,
+        tools: [SAVE_NOTE_TOOL],
         onToken: (token) => {
           textEl.textContent += token;
           this.scrollToBottom();
         },
       });
       this.history.push({ role: "assistant", content: reply.content });
+
+      // Dispatch structured tool calls emitted by the LLM (#53).
+      if (reply.toolCalls && reply.toolCalls.length > 0) {
+        const dispatchDeps = {
+          vault: this.services.vault,
+          ingestWriter: this.services.ingestWriter,
+          index: this.services.index,
+          inboxFolder: this.settings.inboxFolder,
+          openNotePreview: (opts: Parameters<typeof openNotePreview>[1]) =>
+            openNotePreview(this.app, opts),
+          appendSystemMessage: (msg: string) => this.appendMessage("assistant", msg),
+        };
+        for (const call of reply.toolCalls) {
+          const result = await dispatchToolCall(call, dispatchDeps);
+          if (result.kind === "done") {
+            this.appendMessage("assistant", result.summary);
+          }
+        }
+      }
 
       if (this.chatHistory) {
         const ch = this.chatHistory;
