@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "eval:classifier": "tsx eval/runner/classify.ts",
     "eval:classifier:mock": "tsx eval/runner/classify.ts --mock",
-    "eval:classifier:ci": "tsx eval/runner/classify.ts --mock --compare eval/classifier-golden/baseline-mock.json"
+    "eval:classifier:ci": "tsx eval/runner/classify.ts --mock --compare eval/classifier-golden/baseline-mock.json",
+    "eval:retrieval": "tsx eval/runner/retrieval.ts",
+    "eval:retrieval:mock": "tsx eval/runner/retrieval.ts --mock"
   },
   "dependencies": {
     "ajv": "^8.20.0"
