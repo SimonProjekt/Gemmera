@@ -420,3 +420,123 @@
   font-size: 0.7rem;
   color: var(--text-faint);
 }
+
+/* ── Context panel content (#42) ─────────────────────────────────────── */
+
+.gemmera-context-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.gemmera-context__title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.gemmera-context__query {
+  margin: 0;
+  font-style: italic;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.gemmera-context__empty,
+.gemmera-context__status {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+}
+
+.gemmera-context__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gemmera-context__item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.gemmera-context__item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.gemmera-context__item-title {
+  font-size: 0.85rem;
+  color: var(--text-normal);
+}
+
+.gemmera-context__item-meta {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+.gemmera-context__chunk {
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+}
+
+.gemmera-context__chunk-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.gemmera-context__chunk-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gemmera-context__chunk-why {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gemmera-context__chunk-why--semantic { background: var(--color-blue);   color: var(--text-on-accent); }
+.gemmera-context__chunk-why--lexical  { background: var(--color-yellow); color: var(--text-on-accent); }
+.gemmera-context__chunk-why--backlink { background: var(--color-purple); color: var(--text-on-accent); }
+
+.gemmera-context__chunk-score {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+.gemmera-context__chunk-path {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.gemmera-context__chunk-text {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}

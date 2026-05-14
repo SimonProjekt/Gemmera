@@ -24,6 +24,7 @@ import { buildMessageDecoration } from "./message-decoration";
 import { showSaveUndoNotice } from "./notices";
 import { labelForState } from "./services/turn-status";
 import { CitationChipRow } from "./ui/citation-chips";
+import { ContextPanel, type RecentCapture } from "./ui/context-panel";
 import { openTurnInspector } from "./ui/turn-inspector";
 
 export const VIEW_TYPE = "gemmera-chat";
@@ -48,6 +49,9 @@ export class GemmeraChatView extends ItemView {
   private readonly sendLabel = "Skicka";
   private readonly stopLabel = "Stoppa";
   private historyDrawerEl: HTMLElement | null = null;
+  private contextPanel: ContextPanel | null = null;
+  private recentCaptures: RecentCapture[] = [];
+  private readonly RECENT_CAPTURE_CAP = 8;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -162,6 +166,9 @@ export class GemmeraChatView extends ItemView {
 
     this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
     this.historyDrawerEl = this.contextPanelEl.createEl("div", { cls: "gemmera-history" });
+    const contextContentEl = this.contextPanelEl.createEl("div", { cls: "gemmera-context-content-host" });
+    this.contextPanel = new ContextPanel(contextContentEl);
+    this.contextPanel.setIdle(this.recentCaptures);
 
     // chatHistory + chatState are shared with the plugin instance (#43), so
     // detaching the view to a pop-out window and reopening preserves the
@@ -303,6 +310,7 @@ export class GemmeraChatView extends ItemView {
 
   private async runCapture(text: string, turnId: string): Promise<void> {
     this.appendMessage("user", text);
+    this.contextPanel?.setIngestion("Ingesting…");
     try {
       const outcome = await runIngest(
         { text },
@@ -325,6 +333,7 @@ export class GemmeraChatView extends ItemView {
               this.hideStatusChip();
             } else {
               this.showStatusChip(label);
+              this.contextPanel?.setIngestion(label);
             }
           },
         },
@@ -332,6 +341,7 @@ export class GemmeraChatView extends ItemView {
       this.services.runnerStatus.recompute();
 
       if (outcome.kind === "saved") {
+        this.recordCapture(outcome.path);
         const verb = outcome.mode === "append" ? "Appended to" : "Saved to";
         if (outcome.mode === "create") {
           showSaveUndoNotice(this.app, outcome.path);
@@ -340,6 +350,7 @@ export class GemmeraChatView extends ItemView {
         }
         this.appendMessage("assistant", `${verb} **${outcome.path}**`);
       } else if (outcome.kind === "split_saved") {
+        for (const p of outcome.paths) this.recordCapture(p);
         new Notice(`Gemmera: saved ${outcome.paths.length} notes`);
         const list = outcome.paths.map((p) => `- **${p}**`).join("\n");
         this.appendMessage("assistant", `Saved ${outcome.paths.length} notes:\n${list}`);
@@ -353,11 +364,22 @@ export class GemmeraChatView extends ItemView {
       }
     } catch (err) {
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    } finally {
+      this.contextPanel?.setIdle(this.recentCaptures);
     }
+  }
+
+  private recordCapture(path: string): void {
+    const basename = path.split("/").pop()?.replace(/\.md$/, "") ?? path;
+    this.recentCaptures = [
+      { title: basename, path, timestamp: Date.now() },
+      ...this.recentCaptures,
+    ].slice(0, this.RECENT_CAPTURE_CAP);
   }
 
   private async runMixed(text: string, turnId: string, signal?: AbortSignal): Promise<void> {
     this.appendMessage("user", text);
+    this.contextPanel?.setIngestion("Saving note…");
 
     const ingestStatusEl = this.messagesEl.createEl("div", {
       cls: "gemmera-mixed-status gemmera-mixed-status--ingest",
@@ -392,12 +414,20 @@ export class GemmeraChatView extends ItemView {
         onStateChange: (state, label, phase) => {
           if (phase === "ingest") {
             ingestStatusEl.textContent = label;
+            this.contextPanel?.setIngestion(label);
           } else {
             queryStatusEl.style.display = "";
             queryStatusEl.textContent = label;
+            if (this.contextPanel?.currentState.kind !== "query") {
+              this.contextPanel?.setQueryPending(text, label);
+            }
           }
         },
-        onIngestComplete: (path) => { savedPathSoFar = path; },
+        onHits: (hits) => this.contextPanel?.setQueryHits(hits),
+        onIngestComplete: (path) => {
+          savedPathSoFar = path;
+          this.recordCapture(path);
+        },
       });
 
       this.services.runnerStatus.recompute();
@@ -434,6 +464,8 @@ export class GemmeraChatView extends ItemView {
         this.appendMessage("assistant", `Note was saved to **${savedPathSoFar}**, but the query failed unexpectedly.`);
       }
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    } finally {
+      this.contextPanel?.setIdle(this.recentCaptures);
     }
   }
 
@@ -453,6 +485,7 @@ export class GemmeraChatView extends ItemView {
       this.settings.alwaysPreviewBeforeSave,
     );
     this.appendMessage("user", text, decoration);
+    this.contextPanel?.setQueryPending(text, "Searching notes…");
 
     const statusEl = this.messagesEl.createEl("div", {
       cls: "gemmera-mixed-status gemmera-mixed-status--query",
@@ -473,6 +506,7 @@ export class GemmeraChatView extends ItemView {
           onStateChange: (_state, label) => {
             statusEl.textContent = label;
           },
+          onHits: (hits) => this.contextPanel?.setQueryHits(hits),
         },
       );
 
@@ -506,6 +540,8 @@ export class GemmeraChatView extends ItemView {
         return;
       }
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    } finally {
+      this.contextPanel?.setIdle(this.recentCaptures);
     }
   }
 

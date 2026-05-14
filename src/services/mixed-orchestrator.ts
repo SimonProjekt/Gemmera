@@ -36,6 +36,8 @@ export interface MixedOrchestratorDeps {
   turnId?: string;
   /** Called on each state entry with the state name, label, and current phase. */
   onStateChange?: (state: string, label: string, phase: MixedPhase) => void;
+  /** Forwarded to runQuery; see QueryOrchestratorDeps.onHits. */
+  onHits?: (hits: import("../contracts").RetrievalHit[]) => void;
   inboxFolder?: string;
   dedupThreshold?: number;
   alwaysPreview?: boolean;
@@ -134,6 +136,7 @@ export async function runMixed(
       onStateChange: onStateChange
         ? (state, label) => onStateChange(state, label, "query")
         : undefined,
+      onHits: deps.onHits,
     },
   );
 
