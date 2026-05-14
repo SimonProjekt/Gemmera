@@ -13,7 +13,7 @@ import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
 import { isAbortError, StreamingState } from "./services/streaming-state";
 import { createSynthesisNote } from "./services/synthesis-writer";
-import { dispatchToolCall, ALL_TOOLS, type ToolDispatchDeps } from "./services/tool-dispatcher";
+import { dispatchToolCall, selectToolsForIntent, type ToolDispatchDeps } from "./services/tool-dispatcher";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
@@ -580,7 +580,7 @@ export class GemmeraChatView extends ItemView {
       const reply = await this.services.llm.chat({
         model: this.settings.chatModel,
         messages,
-        tools: [...ALL_TOOLS],
+        tools: selectToolsForIntent(intent, route),
         signal,
         onToken: (token) => {
           textEl.textContent += token;

@@ -1,9 +1,12 @@
 import type {
+  ClassifierDecision,
   IndexService,
+  IntentLabel,
   JobQueue,
   LLMToolCall,
   LinksIndex,
   NoteSpec,
+  Tool,
   VaultService,
 } from "../contracts";
 import { composeFile, type IngestWriter } from "./ingest-writer";
@@ -41,6 +44,41 @@ export type ToolResult =
   | { kind: "done"; summary: string; citations?: string[] }
   | { kind: "cancelled"; message: string }
   | { kind: "unknown_tool" };
+
+export interface ToolSelectionRoute {
+  needsDisambiguation?: boolean;
+  decision?: Pick<ClassifierDecision, "fallbackReason">;
+}
+
+/**
+ * Selects the tool schemas to pass to the LLM for a given intent.
+ *
+ * Currently called only from `runChat` (the meta / fallback path). The ask,
+ * capture, and mixed intents route through their own orchestrators
+ * (runAsk / runCapture / runMixed) which do not call llm.chat with tools,
+ * so those branches are ready for a future unified turn runner.
+ */
+export function selectToolsForIntent(
+  intent: IntentLabel | null | undefined,
+  route?: ToolSelectionRoute | null,
+): Tool[] {
+  if (route?.needsDisambiguation || route?.decision?.fallbackReason) {
+    return [];
+  }
+
+  switch (intent) {
+    case "ask":
+      return [...READ_TOOLS];
+    case "capture":
+      return [...WRITE_TOOLS];
+    case "mixed":
+      return [...ALL_TOOLS];
+    case "meta":
+      return [];
+    default:
+      return [];
+  }
+}
 
 export async function dispatchToolCall(
   call: LLMToolCall,
