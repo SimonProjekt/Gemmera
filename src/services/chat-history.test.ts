@@ -175,4 +175,29 @@ describe("ChatHistoryStore", () => {
     list = await store.listSessions();
     expect(list[0].id).toBe(older.id);
   });
+
+  // ── Live retention policy (#152 review) ─────────────────────────────
+
+  it("reads retention from the getter on every pruneIfNeeded call", async () => {
+    let maxSessions: number | undefined = undefined;
+    const store = new ChatHistoryStore(storePath(), () => ({ maxSessions }));
+
+    const s1 = await store.createSession();
+    const s2 = await store.createSession();
+    const s3 = await store.createSession();
+    await store.appendTurn(s1.id, { role: "user", content: "a", timestamp: 1000 });
+    await store.appendTurn(s2.id, { role: "user", content: "b", timestamp: 2000 });
+    await store.appendTurn(s3.id, { role: "user", content: "c", timestamp: 3000 });
+
+    await store.pruneIfNeeded();
+    expect((await store.listSessions()).length).toBe(3);
+
+    // Tighten policy live. The store didn't get a new constructor call;
+    // the next prune must respect the updated value.
+    maxSessions = 2;
+    await store.pruneIfNeeded();
+    const after = await store.listSessions();
+    expect(after).toHaveLength(2);
+    expect(after.map((s) => s.id)).not.toContain(s1.id);
+  });
 });

@@ -212,7 +212,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Chat retention — max days")
       .setDesc(
-        "Drop chats older than this many days. 0 = unlimited (default). Takes effect on the next chat open.",
+        "Drop chats older than this many days. 0 = unlimited (default). Takes effect on the next prune (chat open).",
       )
       .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
         text.setPlaceholder?.("0");
@@ -227,7 +227,7 @@ export class GemmeraSettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Chat retention — max sessions")
       .setDesc(
-        "Keep at most N chats; oldest pruned first. 0 = unlimited (default). Takes effect on the next chat open.",
+        "Keep at most N chats; oldest pruned first. 0 = unlimited (default). Takes effect on the next prune (chat open).",
       )
       .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
         text.setPlaceholder?.("0");

@@ -305,17 +305,18 @@ export default class GemmeraPlugin extends Plugin {
 
   /**
    * Lazy accessor for the shared chat-history store. Constructed on first
-   * call once the vault adapter is known. Retention policy reads from the
-   * plugin settings so toggling them takes effect on the next prune. #43.
+   * call once the vault adapter is known. Passes a *getter* for the retention
+   * policy so live edits to the settings sliders take effect on the next
+   * prune without a plugin reload (#152 review).
    */
   private getChatHistory(): ChatHistoryStore {
     if (!this.chatHistory) {
       const adapter = this.app.vault.adapter as FileSystemAdapter;
       const historyPath = adapter.getFullPath(".coworkmd/chats.json");
-      this.chatHistory = new ChatHistoryStore(historyPath, {
+      this.chatHistory = new ChatHistoryStore(historyPath, () => ({
         maxDays: this.settings.chatRetentionMaxDays > 0 ? this.settings.chatRetentionMaxDays : undefined,
         maxSessions: this.settings.chatRetentionMaxSessions > 0 ? this.settings.chatRetentionMaxSessions : undefined,
-      });
+      }));
     }
     return this.chatHistory;
   }
