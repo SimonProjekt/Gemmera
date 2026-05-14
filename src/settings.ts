@@ -45,7 +45,12 @@ export interface GemmeraSettings {
    * ceilings (tool calls, no-ops, retries) are constants and not exposed here.
    */
   turnTimeoutMs: number;
+
+  /** Ollama tag used for chat and the classifier (e.g. `gemma4:e4b`). */
+  chatModel: string;
 }
+
+export const DEFAULT_CHAT_MODEL = "gemma4:e4b";
 
 export const DEFAULT_SETTINGS: GemmeraSettings = {
   llmBackend: "ollama",
@@ -56,4 +61,5 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   ollamaPathMode: "auto",
   ollamaPath: "",
   turnTimeoutMs: 120_000,
+  chatModel: DEFAULT_CHAT_MODEL,
 };

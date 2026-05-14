@@ -78,7 +78,7 @@ function makeMockLLM(responses: MockResponse[]): LLMService {
       // Verify classifier-specific options are passed.
       expect(opts.format).toBe("json");
       expect(opts.stream).toBe(false);
-      expect(opts.model).toBe("gemma3:latest");
+      expect(opts.model).toBe("gemma4:e4b");
 
       return { content: resp.content ?? "" };
     },

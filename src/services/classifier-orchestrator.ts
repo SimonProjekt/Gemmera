@@ -55,6 +55,13 @@ export interface ClassifyTurnDeps {
   promptLoader: PromptLoader;
   eventWriter: ClassifierEventWriter;
   thresholds?: ClassifierThresholds;
+  /**
+   * Ollama model tag for the classifier call. Threaded through to
+   * `classifyWithLLM`; when omitted, falls back to the default chat model.
+   * Production callers pass `settings.chatModel` so the classifier and the
+   * main chat use the same model.
+   */
+  model?: string;
 }
 
 // ─── Orchestrator ──────────────────────────────────────────────────────
@@ -190,6 +197,7 @@ async function handleLLM(
     result = await classifyWithRetries(classifierInput, {
       llm: deps.llm,
       promptLoader: deps.promptLoader,
+      model: deps.model,
     });
   } catch (err) {
     // Transport errors — re-throw for the caller to surface a Notice.
