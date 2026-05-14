@@ -1,3 +1,6 @@
+/* Container query (not viewport media query) — see #40. Layout responds
+ * to the pane's own width so detached / popped-out leaves get the right
+ * mode independently of the window. Single breakpoint at 600 px. */
 .gemmera-view {
   display: flex;
   flex-direction: column;
