@@ -2,6 +2,8 @@ import { FileSystemAdapter, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "o
 import { readFileSync, existsSync, watch as fsWatch } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
+import { ChatHistoryStore } from "./services/chat-history";
+import { ChatSessionState } from "./services/chat-session-state";
 import { OllamaLifecycle, type OllamaStatus } from "./services/ollama-lifecycle";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
 import { GemmeraSettingsTab } from "./ui/settings-tab";
@@ -14,6 +16,10 @@ export default class GemmeraPlugin extends Plugin {
   private statusBarEl!: HTMLElement;
   private batteryTimer: ReturnType<typeof setInterval> | null = null;
   private batteryPaused = false;
+  // Plugin-instance-level chat state so pop-out / re-open survives (#43).
+  // Constructed lazily on first view open because we need the vault adapter.
+  private chatHistory: ChatHistoryStore | null = null;
+  private chatSessionState = new ChatSessionState();
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -75,7 +81,13 @@ export default class GemmeraPlugin extends Plugin {
 
     this.registerView(
       VIEW_TYPE,
-      (leaf) => new GemmeraChatView(leaf, this.services, this.settings),
+      (leaf) => new GemmeraChatView(
+        leaf,
+        this.services,
+        this.settings,
+        this.getChatHistory(),
+        this.chatSessionState,
+      ),
     );
 
     const ribbonEl = this.addRibbonIcon("message-square", "Gemmera", () => {
@@ -289,6 +301,24 @@ export default class GemmeraPlugin extends Plugin {
       const count = "linkCount" in e ? e.linkCount : 0;
       console.debug(`[gemmera] links:${e.kind} ${e.path} (${count})`);
     });
+  }
+
+  /**
+   * Lazy accessor for the shared chat-history store. Constructed on first
+   * call once the vault adapter is known. Passes a *getter* for the retention
+   * policy so live edits to the settings sliders take effect on the next
+   * prune without a plugin reload (#152 review).
+   */
+  private getChatHistory(): ChatHistoryStore {
+    if (!this.chatHistory) {
+      const adapter = this.app.vault.adapter as FileSystemAdapter;
+      const historyPath = adapter.getFullPath(".coworkmd/chats.json");
+      this.chatHistory = new ChatHistoryStore(historyPath, () => ({
+        maxDays: this.settings.chatRetentionMaxDays > 0 ? this.settings.chatRetentionMaxDays : undefined,
+        maxSessions: this.settings.chatRetentionMaxSessions > 0 ? this.settings.chatRetentionMaxSessions : undefined,
+      }));
+    }
+    return this.chatHistory;
   }
 
   private async openChatView(): Promise<void> {

@@ -24,11 +24,23 @@ interface StoreShape {
   sessions: ChatSession[];
 }
 
+/**
+ * Retention can be a plain object (back-compat / tests) or a getter so the
+ * store reads the *current* plugin settings on every prune. The getter form
+ * avoids the cache-staleness bug from #152 review: changing the retention
+ * sliders in Settings used to require a plugin reload to take effect.
+ */
+export type ChatRetentionSource = ChatRetentionPolicy | (() => ChatRetentionPolicy);
+
 export class ChatHistoryStore {
   constructor(
     private readonly filePath: string,
-    private readonly retention: ChatRetentionPolicy = {},
+    private readonly retention: ChatRetentionSource = {},
   ) {}
+
+  private get retentionPolicy(): ChatRetentionPolicy {
+    return typeof this.retention === "function" ? this.retention() : this.retention;
+  }
 
   async createSession(): Promise<ChatSession> {
     const data = await this.load();
@@ -66,18 +78,38 @@ export class ChatHistoryStore {
     return [...data.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  /**
+   * Rename a session. Returns the updated session, or `null` if the session
+   * doesn't exist or the title is empty/whitespace. Long titles are clamped
+   * to 200 chars so the drawer doesn't overflow. #43.
+   */
+  async renameSession(id: string, title: string): Promise<ChatSession | null> {
+    const trimmed = title.trim();
+    if (!trimmed) return null;
+    const data = await this.load();
+    const session = data.sessions.find((s) => s.id === id);
+    if (!session) return null;
+    session.title = trimmed.slice(0, 200);
+    session.updatedAt = Date.now();
+    await this.flush(data);
+    return session;
+  }
+
   async pruneIfNeeded(): Promise<void> {
-    if (this.retention.maxDays === undefined && this.retention.maxSessions === undefined) return;
+    // Read the policy via the getter so changes to the settings sliders
+    // take effect on the next prune without a plugin reload (#152).
+    const policy = this.retentionPolicy;
+    if (policy.maxDays === undefined && policy.maxSessions === undefined) return;
     const data = await this.load();
     let sessions = [...data.sessions];
-    if (this.retention.maxDays !== undefined) {
-      const cutoff = Date.now() - this.retention.maxDays * 24 * 60 * 60 * 1000;
+    if (policy.maxDays !== undefined) {
+      const cutoff = Date.now() - policy.maxDays * 24 * 60 * 60 * 1000;
       sessions = sessions.filter((s) => s.updatedAt >= cutoff);
     }
-    if (this.retention.maxSessions !== undefined && sessions.length > this.retention.maxSessions) {
+    if (policy.maxSessions !== undefined && sessions.length > policy.maxSessions) {
       sessions = sessions
         .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, this.retention.maxSessions);
+        .slice(0, policy.maxSessions);
     }
     await this.flush({ sessions });
   }

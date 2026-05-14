@@ -55,6 +55,19 @@ export interface GemmeraSettings {
    * Intended for developers; hidden by default in production.
    */
   devMode: boolean;
+
+  /**
+   * Chat retention — cap how many days of chats are kept on disk. 0 / undefined
+   * means unlimited. Pruning runs at view open and after every saved turn.
+   * #43.
+   */
+  chatRetentionMaxDays: number;
+
+  /**
+   * Chat retention — cap the total number of sessions kept on disk, oldest
+   * pruned first. 0 / undefined means unlimited. #43.
+   */
+  chatRetentionMaxSessions: number;
 }
 
 export const DEFAULT_CHAT_MODEL = "gemma4:e4b";
@@ -70,4 +83,6 @@ export const DEFAULT_SETTINGS: GemmeraSettings = {
   turnTimeoutMs: 120_000,
   chatModel: DEFAULT_CHAT_MODEL,
   devMode: false,
+  chatRetentionMaxDays: 0,
+  chatRetentionMaxSessions: 0,
 };

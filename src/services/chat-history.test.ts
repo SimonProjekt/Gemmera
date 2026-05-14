@@ -127,4 +127,77 @@ describe("ChatHistoryStore", () => {
     const loaded = await store.loadSession(session.id);
     expect(loaded).not.toBeNull();
   });
+
+  // ── renameSession (#43) ────────────────────────────────────────────────
+
+  it("renameSession updates the title and persists it", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const session = await store.createSession();
+    const updated = await store.renameSession(session.id, "Sundsvall trip");
+    expect(updated?.title).toBe("Sundsvall trip");
+    const reloaded = await store.loadSession(session.id);
+    expect(reloaded?.title).toBe("Sundsvall trip");
+  });
+
+  it("renameSession trims whitespace and clamps to 200 chars", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const session = await store.createSession();
+    const long = "x".repeat(300);
+    const updated = await store.renameSession(session.id, `   ${long}   `);
+    expect(updated?.title).toHaveLength(200);
+  });
+
+  it("renameSession rejects an empty / whitespace title", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const session = await store.createSession();
+    expect(await store.renameSession(session.id, "")).toBeNull();
+    expect(await store.renameSession(session.id, "   ")).toBeNull();
+    const reloaded = await store.loadSession(session.id);
+    expect(reloaded?.title).toBe("New chat");
+  });
+
+  it("renameSession returns null for unknown id", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const result = await store.renameSession("does-not-exist", "Anything");
+    expect(result).toBeNull();
+  });
+
+  it("renameSession bumps updatedAt so the renamed chat surfaces as recent", async () => {
+    const store = new ChatHistoryStore(storePath());
+    const older = await store.createSession();
+    await new Promise((r) => setTimeout(r, 5));
+    const newer = await store.createSession();
+    let list = await store.listSessions();
+    expect(list[0].id).toBe(newer.id);
+
+    await new Promise((r) => setTimeout(r, 5));
+    await store.renameSession(older.id, "Renamed");
+    list = await store.listSessions();
+    expect(list[0].id).toBe(older.id);
+  });
+
+  // ── Live retention policy (#152 review) ─────────────────────────────
+
+  it("reads retention from the getter on every pruneIfNeeded call", async () => {
+    let maxSessions: number | undefined = undefined;
+    const store = new ChatHistoryStore(storePath(), () => ({ maxSessions }));
+
+    const s1 = await store.createSession();
+    const s2 = await store.createSession();
+    const s3 = await store.createSession();
+    await store.appendTurn(s1.id, { role: "user", content: "a", timestamp: 1000 });
+    await store.appendTurn(s2.id, { role: "user", content: "b", timestamp: 2000 });
+    await store.appendTurn(s3.id, { role: "user", content: "c", timestamp: 3000 });
+
+    await store.pruneIfNeeded();
+    expect((await store.listSessions()).length).toBe(3);
+
+    // Tighten policy live. The store didn't get a new constructor call;
+    // the next prune must respect the updated value.
+    maxSessions = 2;
+    await store.pruneIfNeeded();
+    const after = await store.listSessions();
+    expect(after).toHaveLength(2);
+    expect(after.map((s) => s.id)).not.toContain(s1.id);
+  });
 });
