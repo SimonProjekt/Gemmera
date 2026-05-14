@@ -1,15 +1,19 @@
-import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { readFileSync, existsSync } from "fs";
 import { GemmeraChatView, VIEW_TYPE } from "./view";
 import { createServices, Services } from "./services";
 import { OllamaLifecycle, type OllamaStatus } from "./services/ollama-lifecycle";
 import { DEFAULT_SETTINGS, GemmeraSettings } from "./settings";
 import { GemmeraSettingsTab } from "./ui/settings-tab";
+import { showIngestionFailedNotice, showBatteryPauseNotice } from "./notices";
 
 export default class GemmeraPlugin extends Plugin {
   private services!: Services;
   settings!: GemmeraSettings;
   private lifecycle!: OllamaLifecycle;
   private statusBarEl!: HTMLElement;
+  private batteryTimer: ReturnType<typeof setInterval> | null = null;
+  private batteryPaused = false;
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -73,8 +77,26 @@ export default class GemmeraPlugin extends Plugin {
       (leaf) => new GemmeraChatView(leaf, this.services, this.settings),
     );
 
-    this.addRibbonIcon("message-square", "Gemmera", () => {
+    const ribbonEl = this.addRibbonIcon("message-square", "Gemmera", () => {
       this.openChatView();
+    });
+    ribbonEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      new Menu()
+        .addItem((item) =>
+          item.setTitle("Open in sidebar").setIcon("sidebar-right").onClick(() => this.openChatView()),
+        )
+        .addItem((item) =>
+          item.setTitle("Open in tab").setIcon("file").onClick(() => this.openChatTab()),
+        )
+        .addItem((item) =>
+          item.setTitle("Open in new window").setIcon("popup-open").onClick(() => this.openChatWindow()),
+        )
+        .addSeparator()
+        .addItem((item) =>
+          item.setTitle("Settings").setIcon("settings").onClick(() => this.openSettings()),
+        )
+        .showAtMouseEvent(e);
     });
 
     this.addCommand({
@@ -82,9 +104,110 @@ export default class GemmeraPlugin extends Plugin {
       name: "Öppna chatt",
       callback: () => this.openChatView(),
     });
+
+    this.addCommand({
+      id: "capture-selection",
+      name: "Gemmera: Fånga markering",
+      hotkeys: [{ modifiers: ["Ctrl", "Shift"], key: "C" }],
+      editorCallback: (editor) => {
+        const text = editor.getSelection().trim();
+        if (text) this.openChatWithText(text);
+        else new Notice("Gemmera: Ingen text markerad.");
+      },
+    });
+
+    this.addCommand({
+      id: "capture-active-note",
+      name: "Gemmera: Fånga aktiv anteckning",
+      editorCallback: (editor) => {
+        const text = editor.getValue().trim();
+        if (text) this.openChatWithText(text);
+      },
+    });
+
+    this.addCommand({
+      id: "ask-about-active-note",
+      name: "Gemmera: Fråga om aktiv anteckning",
+      editorCallback: (editor, ctx) => {
+        const noteName = ctx.file?.basename ?? "this note";
+        this.openChatWithText(`Tell me about [[${noteName}]]`);
+      },
+    });
+
+    // ── Editor context menu ──────────────────────────────────────────────
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor, ctx) => {
+        const selection = editor.getSelection().trim();
+        if (selection) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Capture selection")
+              .setIcon("sticky-note")
+              .onClick(() => this.openChatWithText(selection)),
+          );
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Ask about selection")
+              .setIcon("search")
+              .onClick(() => this.openChatWithText(`Tell me about this: ${selection}`)),
+          );
+        }
+        const noteName = ctx.file?.basename;
+        if (noteName) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Ask about note")
+              .setIcon("file-question")
+              .onClick(() => this.openChatWithText(`Tell me about [[${noteName}]]`)),
+          );
+        }
+      }),
+    );
+
+    // ── File context menu (single file) ──────────────────────────────────
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof TFile && file.path.endsWith(".md")) {
+          menu.addSeparator();
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Ask about this note")
+              .setIcon("file-question")
+              .onClick(() => this.openChatWithText(`Tell me about [[${file.basename}]]`)),
+          );
+          menu.addItem((item) =>
+            item
+              .setTitle("Gemmera: Reindex this note")
+              .setIcon("refresh-cw")
+              .onClick(() => this.reindexNote(file)),
+          );
+        }
+      }),
+    );
+
+    // ── Files context menu (multi-file) ──────────────────────────────────
+    this.registerEvent(
+      this.app.workspace.on("files-menu", (menu, files) => {
+        const mdFiles = files.filter((f) => f instanceof TFile && f.path.endsWith(".md")) as TFile[];
+        if (mdFiles.length === 0) return;
+        menu.addSeparator();
+        menu.addItem((item) =>
+          item
+            .setTitle("Gemmera: Ask across these notes")
+            .setIcon("files")
+            .onClick(() => {
+              const links = mdFiles.map((f) => `[[${f.basename}]]`).join(", ");
+              this.openChatWithText(`Tell me about these notes together: ${links}`);
+            }),
+        );
+      }),
+    );
+
+    this.startBatteryMonitor();
   }
 
   async onunload(): Promise<void> {
+    this.stopBatteryMonitor();
     await this.lifecycle?.stop();
     this.services?.eventBridge.stop();
     this.services?.runnerStatus.stop();
@@ -102,6 +225,8 @@ export default class GemmeraPlugin extends Plugin {
     this.services.ingestionRunner.onResult((e) => {
       if (e.kind === "error") {
         console.error("[gemmera] runner error", e.job, e.error);
+        const reason = e.error instanceof Error ? e.error.message : String(e.error);
+        showIngestionFailedNotice(reason, () => this.openChatView());
         return;
       }
       if (e.kind === "decision") {
@@ -151,6 +276,77 @@ export default class GemmeraPlugin extends Plugin {
     if (!leaf) return;
     await leaf.setViewState({ type: VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  private async openChatTab(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  private async openChatWindow(): Promise<void> {
+    const leaf = this.app.workspace.getLeaf("window");
+    await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  private openSettings(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.app as any).setting.open();
+  }
+
+  private async openChatWithText(text: string): Promise<void> {
+    await this.openChatView();
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    const view = leaves[0]?.view as GemmeraChatView | undefined;
+    view?.setComposerText(text);
+  }
+
+  private async reindexNote(file: TFile): Promise<void> {
+    const path = file.path;
+    const exists = await this.services.ingestionStore.get(path);
+    if (exists) await this.services.ingestionStore.delete(path);
+    this.services.jobQueue.enqueue({ kind: "index", path });
+    new Notice(`Gemmera: Reindexing ${path}`);
+  }
+
+  private startBatteryMonitor(): void {
+    const BAT_PATH = "/sys/class/power_supply/BAT0";
+    if (!existsSync(BAT_PATH)) return;
+
+    this.batteryTimer = setInterval(async () => {
+      try {
+        const capRaw = readFileSync(`${BAT_PATH}/capacity`, "utf-8").trim();
+        const capacity = parseInt(capRaw, 10);
+        const status = readFileSync(`${BAT_PATH}/status`, "utf-8").trim();
+
+        if (status === "Discharging" && capacity < 20 && !this.batteryPaused) {
+          this.batteryPaused = true;
+          await this.services.runnerControls.pause();
+          showBatteryPauseNotice(async () => {
+            this.batteryPaused = false;
+            await this.services.runnerControls.resume();
+          });
+        } else if (status !== "Discharging" && this.batteryPaused) {
+          this.batteryPaused = false;
+          await this.services.runnerControls.resume();
+        }
+      } catch {
+        // Battery info unavailable — ignore
+      }
+    }, 60_000);
+  }
+
+  private stopBatteryMonitor(): void {
+    if (this.batteryTimer !== null) {
+      clearInterval(this.batteryTimer);
+      this.batteryTimer = null;
+    }
   }
 }
 

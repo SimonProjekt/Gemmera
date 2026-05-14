@@ -1,4 +1,6 @@
 import type { EventLog, EventLogEntry, JobQueue, VaultService } from "../contracts";
+import type { TurnStatusCallback } from "./turn-status";
+import { labelForState } from "./turn-status";
 
 // ── Op types ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,8 @@ export interface DestructiveOpDeps {
   confirmRename: RenameConfirmHandler;
   eventLog?: EventLog;
   turnId?: string;
+  /** Called synchronously on each state entry so the UI can update its status chip. */
+  onStateChange?: TurnStatusCallback;
 }
 
 // ── State names ───────────────────────────────────────────────────────────────
@@ -82,6 +86,7 @@ export async function runDestructiveOp(
   let prevState = "TOOL_CALL";
 
   const enter = async (state: string, payload?: Record<string, unknown>) => {
+    deps.onStateChange?.(state, labelForState(state));
     if (!deps.eventLog) return;
     const entry: EventLogEntry = {
       turnId,
