@@ -284,3 +284,82 @@
   color: var(--text-on-accent);
   border: none;
 }
+
+/* ── Chat history drawer (#70) ──────────────────────────────────────────── */
+
+.gemmera-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 8px;
+}
+
+.gemmera-history__title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.gemmera-history__new-btn {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.gemmera-history__empty {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 16px 0;
+}
+
+.gemmera-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gemmera-history__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.gemmera-history__item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.gemmera-history__item:focus {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.gemmera-history__item--active {
+  background: var(--background-modifier-active-hover);
+}
+
+.gemmera-history__item-title {
+  font-size: 0.85rem;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gemmera-history__item-meta {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
