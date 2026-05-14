@@ -8,7 +8,7 @@ import type { GemmeraSettings } from "./settings";
 import { parseFileOps, handleFileOps } from "./fileops";
 import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
-import { runIngest } from "./services/ingest-orchestrator";
+import { runIngest, type IngestPreview, type PreviewDecision } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
 import { runQuery } from "./services/query-orchestrator";
 import { isAbortError, StreamingState } from "./services/streaming-state";
@@ -18,6 +18,7 @@ import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
 import { openNotePreview } from "./ui/note-preview-modal";
+import { openSplitPreview } from "./ui/split-preview";
 import { openDeleteConfirm } from "./ui/delete-confirm-modal";
 import { openRenamePreview } from "./ui/rename-preview-modal";
 import { buildMessageDecoration } from "./message-decoration";
@@ -322,7 +323,7 @@ export class GemmeraChatView extends ItemView {
           vault: this.services.vault,
           writer: this.services.ingestWriter,
           jobQueue: this.services.jobQueue,
-          preview: (preview) => openIngestPreview(this.app, preview),
+          preview: (preview) => this.routeIngestPreview(preview),
           eventLog: this.services.eventLog,
           turnId,
           inboxFolder: this.settings.inboxFolder,
@@ -369,6 +370,13 @@ export class GemmeraChatView extends ItemView {
     }
   }
 
+  private routeIngestPreview(preview: IngestPreview): Promise<PreviewDecision> {
+    if (preview.kind === "split" && preview.candidates && preview.candidates.length > 1) {
+      return openSplitPreview(this.app, preview.candidates, { folder: this.settings.inboxFolder });
+    }
+    return openIngestPreview(this.app, preview);
+  }
+
   private recordCapture(path: string): void {
     const basename = path.split("/").pop()?.replace(/\.md$/, "") ?? path;
     this.recentCaptures = [
@@ -402,7 +410,7 @@ export class GemmeraChatView extends ItemView {
         vault: this.services.vault,
         writer: this.services.ingestWriter,
         jobQueue: this.services.jobQueue,
-        preview: (preview) => openIngestPreview(this.app, preview),
+        preview: (preview) => this.routeIngestPreview(preview),
         assembler: this.services.payloadAssembler,
         eventLog: this.services.eventLog,
         turnId,
