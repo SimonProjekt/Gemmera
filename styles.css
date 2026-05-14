@@ -114,13 +114,16 @@
 .gemmera-mixed-status--ingest { border-left: 2px solid var(--color-accent); padding-left: 8px; }
 .gemmera-mixed-status--query  { border-left: 2px solid var(--text-muted); padding-left: 8px; }
 
-.gemmera-retry-btn {
+.gemmera-retry-btn,
+.gemmera-synthesis-btn {
   align-self: flex-start;
   margin-top: 4px;
   font-size: 0.8rem;
   padding: 2px 10px;
   cursor: pointer;
 }
+
+.gemmera-synthesis-btn[disabled] { opacity: 0.6; cursor: progress; }
 
 .gemmera-input-area {
   padding: 10px;
@@ -148,7 +151,8 @@
 
 .gemmera-send:focus-visible,
 .gemmera-disambig-chip__btn:focus-visible,
-.gemmera-retry-btn:focus-visible {
+.gemmera-retry-btn:focus-visible,
+.gemmera-synthesis-btn:focus-visible {
   outline: 2px solid var(--interactive-accent);
   outline-offset: 1px;
 }

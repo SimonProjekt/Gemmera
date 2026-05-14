@@ -9,10 +9,16 @@ const DEFAULT_TOP_K = 3;
 const SNIPPET_CHARS = 2000;
 
 /**
- * Stub IndexService backed by linear vault scan. Same behavior as the existing
- * `searchVault` in src/search.ts, but exposed through the IndexService
- * contract so the UI can be wired against an interface today and swapped for
- * a real index later (see planning/decisions/01-rust-integration.md).
+ * Stub IndexService backed by a linear vault scan.
+ *
+ * As of #14, vault-tagged turns ("ask" / "mixed") go through the
+ * HybridRetriever via `runQuery`. This linear scanner remains as the
+ * fallback context source for `meta` intent and any unclassified turn that
+ * lands in `runChat` — i.e., turns that do not warrant the full RAG loop.
+ *
+ * Do NOT wire new vault-grounded code paths against this — use
+ * `services.retriever` (HybridRetriever) so the retrieval-event invariant
+ * holds.
  */
 export class VaultLinearIndexService implements IndexService {
   constructor(private readonly vault: VaultService) {}

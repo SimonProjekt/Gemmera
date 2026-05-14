@@ -224,6 +224,7 @@ export { RunnerControls } from "./runner-controls";
 export { ScheduledReconciler } from "./scheduled-reconciler";
 export { IngestWriter } from "./ingest-writer";
 export { runIngest } from "./ingest-orchestrator";
+export { createSynthesisNote, buildSynthesisSpec } from "./synthesis-writer";
 export type {
   IngestPreview,
   PreviewDecision,

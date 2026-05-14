@@ -9,6 +9,8 @@ import { classifyTurn } from "./services/classifier-orchestrator";
 import { toDisambiguationRow } from "./services/classifier-events";
 import { runIngest } from "./services/ingest-orchestrator";
 import { runMixed } from "./services/mixed-orchestrator";
+import { runQuery } from "./services/query-orchestrator";
+import { createSynthesisNote } from "./services/synthesis-writer";
 import { DisambiguationChip } from "./disambiguation-chip";
 import { IndexingPill } from "./ui/indexing-pill";
 import { openIngestPreview } from "./ui/ingest-preview-modal";
@@ -224,7 +226,16 @@ export class GemmeraChatView extends ItemView {
       return;
     }
 
-    // ── Chat ──────────────────────────────────────────────────────────
+    // ── Ask (#14) — vault-grounded query through the RAG tool loop ────
+    if (intent === "ask") {
+      await this.runAsk(text, turnId, route ?? null);
+      this.recentTurns = [...this.recentTurns.slice(-2), { text, intent: "ask" }];
+      this.setInputDisabled(false);
+      this.inputEl.focus();
+      return;
+    }
+
+    // ── Chat (meta / fallback, no retrieval) ──────────────────────────
     await this.runChat(text, intent, turnId, route ?? null);
   }
 
@@ -353,6 +364,72 @@ export class GemmeraChatView extends ItemView {
       if (savedPathSoFar) {
         this.appendMessage("assistant", `Note was saved to **${savedPathSoFar}**, but the query failed unexpectedly.`);
       }
+      this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
+    }
+  }
+
+  // INVARIANT (#14): every vault-tagged turn ("ask" intent, or "mixed" via
+  // runMixed) must reach `runQuery`, which exercises the hybrid retriever and
+  // emits a RETRIEVE event. Do NOT route ask intents through `runChat`: that
+  // path uses the linear scan kept only as a fallback for `meta`.
+  private async runAsk(
+    text: string,
+    turnId: string,
+    route: RouteDecision | null = null,
+  ): Promise<void> {
+    const decoration = buildMessageDecoration(
+      route,
+      this.settings.showClassifierDecisions,
+      this.settings.alwaysPreviewBeforeSave,
+    );
+    this.appendMessage("user", text, decoration);
+
+    const statusEl = this.messagesEl.createEl("div", {
+      cls: "gemmera-mixed-status gemmera-mixed-status--query",
+      text: "Searching notes…",
+    });
+
+    try {
+      const outcome = await runQuery(
+        { query: text },
+        {
+          retriever: this.services.retriever,
+          assembler: this.services.payloadAssembler,
+          llm: this.services.llm,
+          eventLog: this.services.eventLog,
+          turnId,
+          model: this.settings.chatModel,
+          onStateChange: (_state, label) => {
+            statusEl.textContent = label;
+          },
+        },
+      );
+
+      statusEl.remove();
+
+      if (outcome.kind === "empty") {
+        this.appendMessage("assistant", "No relevant notes found.");
+      } else if (outcome.kind === "failed") {
+        this.appendMessage("assistant", `Answer failed: ${outcome.reason}`);
+      } else if (outcome.kind === "validation_failed") {
+        this.appendMessage("assistant", outcome.answer);
+      } else {
+        const el = this.messagesEl.createEl("div", { cls: "gemmera-message gemmera-message--assistant" });
+        el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
+        el.createEl("p", { cls: "gemmera-message__text", text: outcome.answer });
+        if (outcome.citations.length > 0) {
+          this.renderCitationChips(el, outcome.citations);
+        }
+        this.renderSynthesisButton(el, {
+          question: text,
+          answer: outcome.answer,
+          citations: outcome.citations,
+          turnId,
+        });
+        this.scrollToBottom();
+      }
+    } catch (err) {
+      statusEl.remove();
       this.appendErrorMessage(err, () => { this.inputEl.value = text; this.inputEl.focus(); });
     }
   }
@@ -511,7 +588,11 @@ export class GemmeraChatView extends ItemView {
             { text: resolution.text, intent: "capture" },
           ];
         } else {
-          await this.runChat(resolution.text, chosenLabel, resolution.turnId);
+          await this.runAsk(resolution.text, resolution.turnId);
+          this.recentTurns = [
+            ...this.recentTurns.slice(-2),
+            { text: resolution.text, intent: "ask" },
+          ];
         }
       }
     }
@@ -548,6 +629,41 @@ export class GemmeraChatView extends ItemView {
   private renderCitationChips(parent: HTMLElement, citations: string[], needsReview = new Set<string>()): void {
     if (citations.length === 0) return;
     new CitationChipRow(this.app, parent, citations, needsReview);
+  }
+
+  private renderSynthesisButton(
+    parent: HTMLElement,
+    payload: { question: string; answer: string; citations: string[]; turnId: string },
+  ): void {
+    const btn = parent.createEl("button", {
+      cls: "gemmera-synthesis-btn",
+      text: "Save answer as note",
+      attr: { "aria-label": "Save this answer as a synthesis note" },
+    });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      try {
+        const { path } = await createSynthesisNote(
+          {
+            question: payload.question,
+            answer: payload.answer,
+            citations: payload.citations,
+            model: this.settings.chatModel,
+            runId: payload.turnId,
+          },
+          this.services.ingestWriter,
+          { folder: this.settings.inboxFolder },
+        );
+        btn.remove();
+        new Notice(`Gemmera: synthesis saved to ${path}`);
+        this.appendMessage("assistant", `Synthesis saved to **${path}**`);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Save answer as note";
+        new Notice(`Gemmera: synthesis save failed — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   }
 
   // ── DOM helpers ──────────────────────────────────────────────────────
