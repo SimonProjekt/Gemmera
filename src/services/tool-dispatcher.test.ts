@@ -24,7 +24,15 @@ function makeDeps(overrides: Partial<ToolDispatchDeps> = {}): ToolDispatchDeps {
 
 describe("dispatchToolCall — routing", () => {
   it("routes save_note with mode=create to save handler", async () => {
-    const confirmResult = { confirmed: true as const, title: "Dogs", folder: "Inbox/", tags: [] };
+    const confirmResult = {
+      confirmed: true as const,
+      title: "Dogs",
+      folder: "Inbox/",
+      tags: [],
+      aliases: [],
+      type: "source" as const,
+      status: "inbox" as const,
+    };
     const deps = makeDeps({ openNotePreview: vi.fn().mockResolvedValue(confirmResult) });
 
     const result = await dispatchToolCall(
@@ -85,6 +93,35 @@ describe("appendUnderDatedSection", () => {
   });
 });
 
+describe("buildFrontmatter", () => {
+  it("emits title-only block when nothing else is provided", () => {
+    expect(buildFrontmatter({ title: "Dogs" })).toBe('---\ntitle: "Dogs"\n---');
+  });
+
+  it("includes type, tags, aliases, and status when provided", () => {
+    const fm = buildFrontmatter({
+      title: "Q2 plan",
+      type: "meeting",
+      status: "inbox",
+      tags: ["q2", "team"],
+      aliases: ["Q2"],
+    });
+    expect(fm).toBe(
+      '---\ntitle: "Q2 plan"\ntype: "meeting"\ntags: ["q2", "team"]\naliases: ["Q2"]\nstatus: "inbox"\n---',
+    );
+  });
+
+  it("omits empty tags and aliases arrays", () => {
+    const fm = buildFrontmatter({ title: "X", type: "source", status: "inbox", tags: [], aliases: [] });
+    expect(fm).not.toContain("tags:");
+    expect(fm).not.toContain("aliases:");
+  });
+
+  it("keeps the legacy (title, tags) signature working", () => {
+    expect(buildFrontmatter("Dogs", ["pet"])).toBe('---\ntitle: "Dogs"\ntags: ["pet"]\n---');
+  });
+});
+
 describe("patchFrontmatter", () => {
   it("escapes regex metacharacters in frontmatter keys", () => {
     const updated = patchFrontmatter("---\nfoo.bar: old\nfooXbar: keep\n---\nBody", { "foo.bar": "new" });
@@ -100,7 +137,15 @@ describe("patchFrontmatter", () => {
 describe("dispatchToolCall — collision handling", () => {
   it("suffixes (2) when the base path already exists", async () => {
     const vault = new MockVaultService({ "Inbox/Dogs.md": "existing" });
-    const confirmResult = { confirmed: true as const, title: "Dogs", folder: "Inbox/", tags: [] };
+    const confirmResult = {
+      confirmed: true as const,
+      title: "Dogs",
+      folder: "Inbox/",
+      tags: [],
+      aliases: [],
+      type: "source" as const,
+      status: "inbox" as const,
+    };
     const deps = makeDeps({ vault, openNotePreview: vi.fn().mockResolvedValue(confirmResult) });
 
     const result = await dispatchToolCall(

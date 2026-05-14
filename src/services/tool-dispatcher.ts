@@ -8,7 +8,7 @@ import type {
 import type { IngestWriter } from "./ingest-writer";
 import { runDestructiveOp } from "./destructive-op-machine";
 import { createSynthesisNote } from "./synthesis-writer";
-import type { NotePreviewResult } from "../ui/note-preview-modal";
+import type { NotePreviewOpts, NotePreviewResult } from "../ui/note-preview-modal";
 
 export interface ToolDispatchDeps {
   vault: VaultService;
@@ -21,12 +21,7 @@ export interface ToolDispatchDeps {
   /** Model tag, used when creating synthesis notes. */
   chatModel: string;
   /** UI callback: note preview modal for create. Returns null on cancel. */
-  openNotePreview: (opts: {
-    title: string;
-    body: string;
-    folder: string;
-    tags: string[];
-  }) => Promise<NotePreviewResult | null>;
+  openNotePreview: (opts: NotePreviewOpts) => Promise<NotePreviewResult | null>;
   /**
    * UI callback: mandatory delete confirmation (non-overridable).
    * Resolves "confirmed" or "cancelled".
@@ -115,7 +110,13 @@ async function dispatchSaveCreate(
   const safeName = result.title.replace(/[\\/:*?"<>|]/g, "_");
   const path = await findUniquePath(deps.vault, folder, safeName);
 
-  const frontmatter = buildFrontmatter(result.title, result.tags);
+  const frontmatter = buildFrontmatter({
+    title: result.title,
+    type: result.type,
+    status: result.status,
+    tags: result.tags,
+    aliases: result.aliases,
+  });
   const content = `${frontmatter}\n${args.body_markdown ?? ""}`;
 
   await deps.vault.create(path, content);
@@ -232,12 +233,29 @@ async function findUniquePath(vault: VaultService, folder: string, name: string)
   return `${folder}${name} (${Date.now()}).md`;
 }
 
+export interface FrontmatterInput {
+  title: string;
+  type?: string;
+  status?: string;
+  tags?: string[];
+  aliases?: string[];
+}
+
 /** Build a YAML frontmatter block. Values use JSON-compatible YAML flow scalars. */
-export function buildFrontmatter(title: string, tags: string[]): string {
-  const lines = ["---", `title: ${yamlValue(title)}`];
-  if (tags.length > 0) {
-    lines.push(`tags: [${tags.map((t) => yamlValue(t)).join(", ")}]`);
+export function buildFrontmatter(input: FrontmatterInput | string, legacyTags?: string[]): string {
+  // Back-compat with the previous (title, tags) signature.
+  const fm: FrontmatterInput = typeof input === "string"
+    ? { title: input, tags: legacyTags }
+    : input;
+  const lines = ["---", `title: ${yamlValue(fm.title)}`];
+  if (fm.type) lines.push(`type: ${yamlValue(fm.type)}`);
+  if (fm.tags && fm.tags.length > 0) {
+    lines.push(`tags: [${fm.tags.map((t) => yamlValue(t)).join(", ")}]`);
   }
+  if (fm.aliases && fm.aliases.length > 0) {
+    lines.push(`aliases: [${fm.aliases.map((a) => yamlValue(a)).join(", ")}]`);
+  }
+  if (fm.status) lines.push(`status: ${yamlValue(fm.status)}`);
   lines.push("---");
   return lines.join("\n");
 }

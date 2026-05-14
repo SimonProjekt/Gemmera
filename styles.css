@@ -313,6 +313,12 @@
   border: none;
 }
 
+.gemmera-note-preview__error {
+  color: var(--text-error);
+  font-size: 0.85rem;
+  margin: 8px 0 0;
+}
+
 /* ── Chat history drawer (#70) ──────────────────────────────────────────── */
 
 .gemmera-history__head {
