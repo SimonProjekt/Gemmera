@@ -891,12 +891,17 @@ export class GemmeraChatView extends ItemView {
    * Refill the composer with the in-flight user text so the user can edit and
    * resend as a *new* turn (each Send creates a fresh turnId / userTs, so the
    * cancelled turn is preserved in history alongside the retry).
+   *
+   * Clears `inFlightText` here too so the next `handleSend` early-exit path
+   * (empty composer, etc.) can't see a stale value from the cancelled turn —
+   * the textarea is now the source of truth for the retry.
    */
   private cancelStreaming(restoreText?: string): void {
     if (!this.streaming.cancel()) return;
     if (restoreText) {
       this.inputEl.value = restoreText;
     }
+    this.inFlightText = null;
     this.setStreaming(false);
     this.inputEl.focus();
   }
