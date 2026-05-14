@@ -332,7 +332,10 @@ export default class GemmeraPlugin extends Plugin {
     if (!(adapter instanceof FileSystemAdapter)) return;
     let debounce: ReturnType<typeof setTimeout> | null = null;
     const watcher = fsWatch(adapter.getBasePath(), { persistent: false }, (_event, filename) => {
-      if (filename !== ".coworkignore") return;
+      // Some Linux FSes (FUSE, certain NFS configs) pass null filename on
+      // `change` events. Treat null as "could be ours" — reload is cheap,
+      // debounced, and idempotent, so a few unrelated wake-ups are fine.
+      if (filename !== null && filename !== ".coworkignore") return;
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => { void this.reloadCoworkIgnore(); }, 200);
     });
