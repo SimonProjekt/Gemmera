@@ -27,6 +27,8 @@ import { labelForState } from "./services/turn-status";
 import { CitationChipRow } from "./ui/citation-chips";
 import { ContextPanel, type RecentCapture } from "./ui/context-panel";
 import { openTurnInspector } from "./ui/turn-inspector";
+import { categorizeError, userMessageForCategory } from "./ui/error-category";
+import { HistoryDrawer } from "./ui/history-drawer";
 
 export const VIEW_TYPE = "gemmera-chat";
 
@@ -49,7 +51,7 @@ export class GemmeraChatView extends ItemView {
   private inFlightText: string | null = null;
   private readonly sendLabel = "Skicka";
   private readonly stopLabel = "Stoppa";
-  private historyDrawerEl: HTMLElement | null = null;
+  private drawer: HistoryDrawer | null = null;
   private contextPanel: ContextPanel | null = null;
   private recentCaptures: RecentCapture[] = [];
   private readonly RECENT_CAPTURE_CAP = 8;
@@ -172,7 +174,13 @@ export class GemmeraChatView extends ItemView {
     });
 
     this.contextPanelEl = bodyEl.createEl("div", { cls: "gemmera-context-panel" });
-    this.historyDrawerEl = this.contextPanelEl.createEl("div", { cls: "gemmera-history" });
+    const historyDrawerEl = this.contextPanelEl.createEl("div", { cls: "gemmera-history" });
+    this.drawer = new HistoryDrawer(
+      historyDrawerEl,
+      this.chatHistory,
+      (session) => void this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err)),
+      () => this.startNewSession(),
+    );
     const contextContentEl = this.contextPanelEl.createEl("div", { cls: "gemmera-context-content-host" });
     this.contextPanel = new ContextPanel(contextContentEl);
     this.contextPanel.setIdle(this.recentCaptures);
@@ -726,125 +734,7 @@ export class GemmeraChatView extends ItemView {
   // ── Chat history drawer (#70 + #43) ──────────────────────────────────
 
   private async renderHistoryDrawer(): Promise<void> {
-    const el = this.historyDrawerEl;
-    if (!el) return;
-
-    el.empty();
-
-    const headEl = el.createEl("div", { cls: "gemmera-history__head" });
-    headEl.createEl("span", { cls: "gemmera-history__title", text: "Chats" });
-
-    const newBtn = headEl.createEl("button", {
-      cls: "gemmera-history__new-btn",
-      text: "+ Ny chatt",
-      attr: { "aria-label": "Start a new chat" },
-    });
-    newBtn.addEventListener("click", () => this.startNewSession());
-
-    const sessions = await this.chatHistory.listSessions();
-    if (sessions.length === 0) {
-      el.createEl("p", { cls: "gemmera-history__empty", text: "Inga sparade chattar." });
-      return;
-    }
-
-    const listEl = el.createEl("ul", { cls: "gemmera-history__list" });
-    for (const session of sessions) {
-      const isActive = session.id === this.currentSessionId;
-      const item = listEl.createEl("li", {
-        cls: `gemmera-history__item${isActive ? " gemmera-history__item--active" : ""}`,
-        attr: { tabindex: "0", role: "button", "aria-pressed": String(isActive) },
-      });
-      const titleEl = item.createEl("span", {
-        cls: "gemmera-history__item-title",
-        text: session.title,
-        attr: { title: "Double-click to rename" },
-      });
-      const meta = formatSessionMeta(session.updatedAt, session.turns.filter((t) => t.role === "user").length);
-      item.createEl("span", { cls: "gemmera-history__item-meta", text: meta });
-
-      item.addEventListener("click", () => this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err)));
-      item.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          this.switchToSession(session).catch((err) => console.error("[gemmera] switchToSession:", err));
-        }
-      });
-
-      // Inline rename: double-click title → contenteditable, blur/Enter saves,
-      // Escape reverts. Stops propagation so the item-level click handler
-      // doesn't swap the session out from under the edit. #43.
-      titleEl.addEventListener("dblclick", (e) => {
-        e.stopPropagation();
-        this.beginInlineRename(titleEl, session.id, session.title);
-      });
-    }
-  }
-
-  private beginInlineRename(titleEl: HTMLElement, sessionId: string, original: string): void {
-    titleEl.setAttribute("contenteditable", "true");
-    titleEl.addClass("gemmera-history__item-title--editing");
-    titleEl.focus();
-    // Select all of the existing title for quick replacement.
-    const range = document.createRange();
-    range.selectNodeContents(titleEl);
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(range);
-
-    const commit = async () => {
-      titleEl.removeAttribute("contenteditable");
-      titleEl.removeClass("gemmera-history__item-title--editing");
-      const next = (titleEl.textContent ?? "").trim();
-      if (next.length === 0 || next === original) {
-        titleEl.setText(original);
-        return;
-      }
-      try {
-        const updated = await this.chatHistory.renameSession(sessionId, next);
-        if (updated) {
-          titleEl.setText(updated.title);
-          // Re-render so the meta line picks up the bumped updatedAt and the
-          // renamed chat surfaces at the top.
-          await this.renderHistoryDrawer();
-        } else {
-          titleEl.setText(original);
-        }
-      } catch (err) {
-        console.error("[gemmera] renameSession:", err);
-        titleEl.setText(original);
-      }
-    };
-
-    const cancel = () => {
-      titleEl.removeAttribute("contenteditable");
-      titleEl.removeClass("gemmera-history__item-title--editing");
-      titleEl.setText(original);
-    };
-
-    // Tie both listeners to one AbortController so commit/cancel guarantees
-    // the keydown handler is removed too. Without this, dblclick → Escape →
-    // dblclick on the same node would stack a second keydown handler since
-    // the node isn't rebuilt until renderHistoryDrawer runs. #152 review.
-    const ac = new AbortController();
-    titleEl.addEventListener(
-      "blur",
-      () => { ac.abort(); void commit(); },
-      { once: true },
-    );
-    titleEl.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          titleEl.blur();
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          cancel();
-          titleEl.blur();
-        }
-      },
-      { signal: ac.signal },
-    );
+    await this.drawer?.render(this.currentSessionId);
   }
 
   private startNewSession(): void {
@@ -1180,30 +1070,6 @@ export class GemmeraChatView extends ItemView {
   }
 }
 
-type ErrorCategory = "ollama_down" | "timeout" | "model_missing" | "unknown";
-
-function categorizeError(err: unknown): ErrorCategory {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  if (err instanceof Error && err.name === "AbortError") return "timeout";
-  if (msg.includes("timeout")) return "timeout";
-  if (msg.includes("econnrefused") || msg.includes("failed to fetch") || msg.includes("network error")) {
-    return "ollama_down";
-  }
-  if (msg.includes("not found") || msg.includes("pull model") || msg.includes("no such model")) {
-    return "model_missing";
-  }
-  return "unknown";
-}
-
-function userMessageForCategory(category: ErrorCategory, rawMessage: string): string {
-  switch (category) {
-    case "ollama_down": return "Ollama is not responding. Make sure Ollama is running and try again.";
-    case "timeout": return "The request timed out. Please try again.";
-    case "model_missing": return "Model not found. Check your Ollama installation.";
-    default: return `Something went wrong: ${rawMessage}`;
-  }
-}
-
 export function withContext(
   history: ChatMessage[],
   results: IndexSearchResult[],
@@ -1219,15 +1085,6 @@ export function withContext(
     { role: "assistant", content: "Förstått, jag har läst anteckningarna." },
     ...history,
   ];
-}
-
-function formatSessionMeta(updatedAt: number, turnCount: number): string {
-  const turns = turnCount;
-  const date = new Date(updatedAt).toLocaleDateString("sv-SE", {
-    month: "short",
-    day: "numeric",
-  });
-  return `${date} · ${turns} meddelande${turns === 1 ? "" : "n"}`;
 }
 
 /** Extract unique [[wikilink]] paths from markdown text. */
