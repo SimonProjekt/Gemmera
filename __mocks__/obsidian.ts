@@ -11,7 +11,13 @@ export class FileSystemAdapter {
 export class Plugin {}
 export class WorkspaceLeaf {}
 export class ItemView {}
-export class MarkdownRenderer {}
+export class Component {
+  load(): void {}
+  unload(): void {}
+}
+export class MarkdownRenderer {
+  static async render(): Promise<void> {}
+}
 
 // Minimal stand-ins for tests that reference UI types but don't actually
 // render. Real Obsidian provides full implementations at runtime.

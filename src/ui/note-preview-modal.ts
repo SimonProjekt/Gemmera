@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Modal, type App } from "obsidian";
+import { Component, MarkdownRenderer, Modal, type App } from "obsidian";
 
 export const NOTE_TYPES = ["source", "evergreen", "project", "meeting", "person", "concept"] as const;
 export type NoteType = (typeof NOTE_TYPES)[number];
@@ -54,6 +54,7 @@ export function openNotePreview(
 
 class NotePreviewModal extends Modal {
   private resolved = false;
+  private readonly renderOwner = new Component();
 
   constructor(
     app: App,
@@ -64,6 +65,7 @@ class NotePreviewModal extends Modal {
   }
 
   onOpen(): void {
+    this.renderOwner.load();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("gemmera-note-preview");
@@ -94,7 +96,7 @@ class NotePreviewModal extends Modal {
 
     contentEl.createEl("p", { text: "Preview", cls: "gemmera-note-preview__label" });
     const previewEl = contentEl.createEl("div", { cls: "gemmera-note-preview__body" });
-    MarkdownRenderer.render(this.app, this.opts.body, previewEl, "", this).catch(() => {
+    MarkdownRenderer.render(this.app, this.opts.body, previewEl, "", this.renderOwner).catch(() => {
       previewEl.textContent = this.opts.body;
     });
 
@@ -173,6 +175,7 @@ class NotePreviewModal extends Modal {
   }
 
   onClose(): void {
+    this.renderOwner.unload();
     if (!this.resolved) {
       this.resolved = true;
       this.onDone(null);
