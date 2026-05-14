@@ -19,7 +19,7 @@ export interface GoldenExample {
 const GOLDEN_DIR = join(__dirname, "..", "..", "evals", "golden");
 
 /** Known shards, by filename stem. New shards land here as they're authored. */
-export const SHARDS = ["link-structure"] as const;
+export const SHARDS = ["link-structure", "lexical", "semantic", "mixed"] as const;
 export type ShardName = (typeof SHARDS)[number];
 
 export function loadShard(shard: ShardName): GoldenExample[] {
