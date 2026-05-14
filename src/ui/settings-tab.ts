@@ -186,10 +186,10 @@ export class GemmeraSettingsTab extends PluginSettingTab {
       .setDesc(
         "Ollama tag used for chat and the intent classifier. Must be pulled (`ollama pull <tag>`). Default `gemma4:e4b`.",
       )
-      .addText((text: { setValue: (v: string) => unknown; onChange: (cb: (v: string) => void) => unknown; setPlaceholder?: (s: string) => unknown }) => {
-        text.setPlaceholder?.(DEFAULT_CHAT_MODEL);
+      .addText((text) => {
+        text.setPlaceholder(DEFAULT_CHAT_MODEL);
         text.setValue(this.settings.chatModel);
-        text.onChange(async (value: string) => {
+        text.onChange(async (value) => {
           this.settings.chatModel = value.trim() || DEFAULT_CHAT_MODEL;
           await this.saveSettings();
         });
