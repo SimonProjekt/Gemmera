@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+import type { RouteDecision } from "../contracts";
 import { MockVaultService } from "../contracts/mocks/mock-vault";
-import { dispatchToolCall, appendUnderDatedSection, patchFrontmatter, type ToolDispatchDeps } from "./tool-dispatcher";
+import {
+  ALL_TOOLS,
+  READ_TOOLS,
+  WRITE_TOOLS,
+  appendUnderDatedSection,
+  dispatchToolCall,
+  patchFrontmatter,
+  selectToolsForIntent,
+  type ToolDispatchDeps,
+} from "./tool-dispatcher";
 import { InMemoryJobQueue } from "./in-memory-job-queue";
 import { IngestWriter } from "./ingest-writer";
 
@@ -32,6 +42,48 @@ const fullConfirm = {
   status: "inbox" as const,
   summary: "Notes on dogs.",
 };
+
+function toolNames(tools: readonly { name: string }[]): string[] {
+  return tools.map((tool) => tool.name);
+}
+
+function selectionRoute(
+  overrides: Partial<Pick<RouteDecision, "needsDisambiguation">> & {
+    fallbackReason?: RouteDecision["decision"]["fallbackReason"];
+  } = {},
+): { needsDisambiguation: boolean; decision: Pick<RouteDecision["decision"], "fallbackReason"> } {
+  return {
+    needsDisambiguation: overrides.needsDisambiguation ?? false,
+    decision: { fallbackReason: overrides.fallbackReason ?? null },
+  };
+}
+
+describe("selectToolsForIntent", () => {
+  it("selects read tools for ask turns", () => {
+    expect(toolNames(selectToolsForIntent("ask"))).toEqual(toolNames(READ_TOOLS));
+  });
+
+  it("selects write tools for capture turns", () => {
+    expect(toolNames(selectToolsForIntent("capture"))).toEqual(toolNames(WRITE_TOOLS));
+  });
+
+  it("selects read and write tools for mixed turns", () => {
+    expect(toolNames(selectToolsForIntent("mixed"))).toEqual(toolNames(ALL_TOOLS));
+  });
+
+  it("withholds tools for meta and unknown routes", () => {
+    expect(selectToolsForIntent("meta")).toEqual([]);
+    expect(selectToolsForIntent(null)).toEqual([]);
+  });
+
+  it("withholds tools while the route needs disambiguation", () => {
+    expect(selectToolsForIntent("ask", selectionRoute({ needsDisambiguation: true }))).toEqual([]);
+  });
+
+  it("withholds tools after classifier fallbacks", () => {
+    expect(selectToolsForIntent("capture", selectionRoute({ fallbackReason: "unparseable" }))).toEqual([]);
+  });
+});
 
 describe("dispatchToolCall — routing", () => {
   it("routes save_note with mode=create to save handler", async () => {
