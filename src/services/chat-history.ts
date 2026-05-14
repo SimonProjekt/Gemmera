@@ -67,6 +67,7 @@ export class ChatHistoryStore {
   }
 
   async pruneIfNeeded(): Promise<void> {
+    if (this.retention.maxDays === undefined && this.retention.maxSessions === undefined) return;
     const data = await this.load();
     let sessions = [...data.sessions];
     if (this.retention.maxDays !== undefined) {
