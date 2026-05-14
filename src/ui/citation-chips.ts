@@ -56,7 +56,7 @@ export class CitationChipRow implements HoverParent {
         el.createEl("span", { cls: "gemmera-citation-chip__warning", text: "!" });
       }
 
-      el.addEventListener("click", (e) => this.openChip(chip.path, e));
+      el.addEventListener("click", (e) => { this.focusedIndex = i; this.openChip(chip.path, e); });
       el.addEventListener("keydown", (e) => this.handleKey(e, i));
 
       // HoverParent: Obsidian's hover preview works when the element has
