@@ -1,84 +1,63 @@
-# Personlig kunskapsbas - Gemmera
+# Gemmera — Local AI Knowledge Base for Obsidian
 
-**DD1349 VT26 — Projektuppgift i introduktion till datalogi**
+An Obsidian plugin that turns your vault into a local, private knowledge base powered by Google's Gemma model. Chat with Gemma directly inside Obsidian, and the model creates and updates interlinked wiki pages with `[[wikilinks]]` on your behalf — all without any data leaving your machine.
 
-Ett Obsidian-plugin som förvandlar din vault till en lokal, privat kunskapsbas driven av Googles Gemma-modell. Användaren chattar med Gemma direkt i Obsidian, och modellen skapar och uppdaterar sammanlänkade wiki-sidor med `[[wikilinks]]` åt användaren — allt utan att data lämnar datorn.
+## Features
 
-## MVP
+- **Chat interface** — talk to Gemma in a sidebar panel inside Obsidian.
+- **File creation from chat** — Gemma can create new Markdown files with `[[wikilinks]]` based on the conversation (e.g., "make a note about what we just discussed").
+- **Updating existing pages** — Gemma can read and append content to existing files, with a preview before changes are written.
+- **Vault search** — Gemma can look up content across your vault's files and answer with source citations.
+- **Intent classification** — an auto-classifier routes each turn between capture (save a note) and ask (query the vault).
+- **Hybrid retrieval** — semantic (vector) + lexical (BM25) + link-graph signals fused via reciprocal rank fusion.
+- **Streaming responses** — token-by-token output with a Stop button for immediate cancellation.
+- **Chat history** — persistent sessions with inline rename, retention controls, and pop-out window support.
+- **Pre-save commit gate** — a modal lets you edit title, type, status, tags, and aliases before a new note is written, validated against the frontmatter schema.
 
-Ett Obsidian-plugin som lägger till en chattpanel i sidofältet. Gemma kör lokalt via Ollama med token-för-token strömning och bibehåller konversationshistorik mellan sessioner.
+The "Jonas Berg" persona (diaries, letters, and book reviews in Swedish) ships as a demo vault so everything works right after installation.
 
-Kärnfunktioner:
+## Installation
 
-- **Chatt-gränssnitt** — användaren pratar med Gemma i en panel inne i Obsidian.
-- **Filskapande via chat** — Gemma kan skapa nya markdown-filer med `[[wikilinks]]` baserat på konversationen (t.ex. "gör en anteckning om det vi just diskuterade").
-- **Uppdatering av befintliga sidor** — Gemma kan läsa och lägga till innehåll i existerande filer, med preview innan ändring skrivs.
-- **Sökning i vaulten** — Gemma kan slå upp innehåll i vaultens filer för att svara med citat till källor.
+- **Clone the repo** — `git clone` the Gemmera repo to any location.
+- **Install dependencies** — `npm install` in the project directory.
+- **Build the plugin** — `npm run build` to generate `main.js`.
+- **Copy to your vault** — place `main.js`, `manifest.json`, and `styles.css` in `<vault>/.obsidian/plugins/gemmera/`.
+- **Pull models via Ollama** — `ollama pull gemma4` for chat and `ollama pull bge-m3` for indexing.
+- **Enable** — turn on Gemmera under Obsidian Settings → Community plugins.
 
-Fejkpersonen "Jonas Berg" (dagböcker, brev och bokrecensioner på svenska) medföljer som demo-vault så allt fungerar direkt efter installation.
+On first activation the plugin builds a local index over your vault (chunks + embeddings) in `<vault>/.coworkmd/`. For a vault of ~5,000 notes this takes 10–30 minutes on CPU; chat is usable immediately and retrieval improves as indexing progresses.
 
-## Distribution
+## Dependencies
 
-Planen är att publicera Gemmera på GitHub under MIT-licens. README:n kommer att innehålla en installations-checklista och en lista över beroenden. Exakt innehåll fastställs senare i projektet — nedan är ett **exempel** på hur det skulle kunna se ut.
+- **Obsidian** (≥ 1.5)
+- **Node.js** and **npm** — for building.
+- **Ollama** — installed locally (the plugin detects a running instance or spawns one automatically).
+- **Gemma 4** — pulled via Ollama (size depends on your hardware).
+- **BGE-M3** — embeddings model for indexing (`ollama pull bge-m3`, ~1.2 GB).
+- **Recommended:** ~8 GB RAM for smaller models, more for larger variants.
 
-*Exempel på installations-checklista:*
+## Security Principles
 
-- **Klona repo** — t.ex. `git clone` av Gemmera-repot till valfri plats.
-- **Installera beroenden** — t.ex. `npm install` i projektmappen.
-- **Bygg plugin** — t.ex. `npm run build` för att generera `main.js`.
-- **Kopiera till vault** — t.ex. lägg `main.js`, `manifest.json` och `styles.css` i `<vault>/.obsidian/plugins/gemmera/`.
-- **Hämta modeller via Ollama** — `ollama pull gemma3` för chatten och `ollama pull bge-m3` för indexeringen.
-- **Aktivera** — t.ex. slå på Gemmera under Obsidians inställningar → Community plugins.
+- Preview-before-write is the default for all file changes.
+- Append-only updates to existing pages.
+- Deletion requires explicit confirmation in the UI.
+- Runs locally via Ollama. No cloud API fallback.
+- MIT license.
 
-Vid första aktivering bygger pluginet ett lokalt index över vaulten (chunks + embeddings) i `<vault>/.coworkmd/`. För en vault med ~5 000 anteckningar tar det 10–30 min på CPU; chatten är användbar direkt och retrieval blir gradvis bättre allt eftersom indexeringen färdigställs.
+## Technical Stack
 
-*Exempel på beroenden:*
+TypeScript, Obsidian Plugin API, Gemma 4 via Ollama (local), Markdown with Obsidian-compatible wikilinks.
 
-- **Obsidian** (t.ex. ≥ 1.5)
-- **Node.js** och **npm** — för bygget.
-- **Ollama** — lokalt installerad och igång.
-- **Gemma-modell** — hämtas via Ollama (storlek beroende på hårdvara).
-- **BGE-M3** — embeddingsmodell för indexering (`ollama pull bge-m3`, ~1.2 GB).
-- **Rekommenderat:** ~8 GB RAM för mindre modell, mer för större varianter.
+## Development
 
-## Säkerhetsprinciper
+```bash
+npm test          # run unit tests (621 tests across 57 files)
+npm run build     # production bundle
+npm run typecheck # TypeScript type check (tsc --noEmit)
+```
 
-- Preview-innan-skriv som default för alla filändringar.
-- Append-only uppdateringar av existerande sidor.
-- Radering kräver explicit bekräftelse i UI.
-- Lokalt via Ollama. Inget cloud-API-fallback.
-- MIT-licens.
+## Project Status
 
-## Teknisk stack
+Core MVP is complete: chat with streaming, intent classification, hybrid retrieval, note CRUD with preview gate, chat history with retention, and incremental indexing. See open issues for remaining work.
 
-TypeScript, Obsidian Plugin API, Svelte för chat-UI, Gemma via Ollama lokalt, Markdown med Obsidian-kompatibla wikilinks.
-## Tidsplan — 4 veckor
-
-### Vecka 1 ✅ (grund)
-- [x] Repo-setup
-- [x] Plugin-skelett
-- [x] Ollama-integration med token-strömning
-- [x] Chat-panel med konversationshistorik
-- [x] Persona-generering (Jonas Berg, svenska anteckningar)
-
-### Vecka 2 ✅ (full MVP)
-- [x] Verktyg för filskapande, läsning och uppdatering
-- [x] Preview-dialog
-- [x] Vault-sökning med citat
-
-### Vecka 3 ✅ (utökning)
-- [x] Inkrementell indexering — markdown-medveten chunker, hash-grindad pipeline, file-event-prenumeration, BGE-M3-embedder via Ollama, vektorbutik, kall-start-rekonciliering
-
-**Slutacceptans:** en ny person installerar pluginet, följer README, och har en fungerande chatt som kan skapa filer i sin vault inom 20 min på en typisk 8 GB-bärbar.
-
-## Utvärdering
-
-20 förberedda frågor/uppgifter om Jonas med kända svar. Mätvärden: svarsandel, citat-korrekthet, kvalitet på skapade filer och wikilinks, körtid (P50/P95) för svar och filskapande.
-
-## Team
-
-Par-projekt. Person A: Ollama-integration och LLM-prompting/verktygsanrop. Person B: Obsidian-plugin-UI, chat-panel, persona-generering. Båda deltar i planering varje vecka; review-rollen roterar.
-
-Se [projektbeskrivning.md](projektbeskrivning.md) för fullständig specifikation.
-
-
+See [planning/overview.md](planning/overview.md) for the full architecture document.
