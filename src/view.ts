@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
 import type { ChatMessage, IndexSearchResult } from "./contracts";
 import type { ClassifierDecision, IntentLabel } from "./contracts/classifier";
 import { DEFAULT_THRESHOLDS } from "./contracts/classifier";
@@ -20,7 +20,7 @@ export class GemmeraChatView extends ItemView {
   private chipDecision: ClassifierDecision | null = null;
   private history: ChatMessage[] = [];
   private recentTurns: RecentTurn[] = [];
-  private model = "gemma3:latest";
+  private model = "gemma3:4b";
 
   constructor(leaf: WorkspaceLeaf, private readonly services: Services) {
     super(leaf);
@@ -182,19 +182,26 @@ export class GemmeraChatView extends ItemView {
 
   private async runAskPath(text: string): Promise<void> {
     const { el: assistantEl, textEl } = this.appendStreamingMessage();
+    textEl.textContent = "Tänker...";
     try {
       const searchResults = await this.services.index.search(text);
       const messages = withContext(this.history, searchResults);
 
+      let firstToken = true;
+      const tokens: string[] = [];
       const reply = await this.services.llm.chat({
         model: this.model,
         messages,
         onToken: (token) => {
-          textEl.textContent += token;
+          if (firstToken) { textEl.textContent = ""; firstToken = false; }
+          tokens.push(token);
+          textEl.textContent = tokens.join("");
           this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
         },
       });
       this.history.push({ role: "assistant", content: reply.content });
+      await MarkdownRenderer.render(this.app, reply.content, textEl, "", this);
+      this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
 
       if (searchResults.length > 0) {
         this.appendCitations(assistantEl, searchResults.map((r) => r.basename));
@@ -306,7 +313,7 @@ export class GemmeraChatView extends ItemView {
   private appendStreamingMessage(): { el: HTMLElement; textEl: HTMLElement } {
     const el = this.messagesEl.createEl("div", { cls: "gemmera-message gemmera-message--assistant" });
     el.createEl("span", { cls: "gemmera-message__role", text: "Gemma" });
-    const textEl = el.createEl("p", { cls: "gemmera-message__text", text: "" });
+    const textEl = el.createEl("div", { cls: "gemmera-message__text" });
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
     return { el, textEl };
   }
@@ -314,7 +321,12 @@ export class GemmeraChatView extends ItemView {
   private appendMessage(role: "user" | "assistant", text: string): void {
     const msg = this.messagesEl.createEl("div", { cls: `gemmera-message gemmera-message--${role}` });
     msg.createEl("span", { cls: "gemmera-message__role", text: role === "user" ? "Du" : "Gemma" });
-    msg.createEl("p", { cls: "gemmera-message__text", text });
+    const textEl = msg.createEl("div", { cls: "gemmera-message__text" });
+    if (role === "assistant") {
+      void MarkdownRenderer.render(this.app, text, textEl, "", this);
+    } else {
+      textEl.textContent = text;
+    }
     this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: "smooth" });
   }
 

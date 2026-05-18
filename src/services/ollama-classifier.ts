@@ -10,7 +10,7 @@ import { DEFAULT_THRESHOLDS } from "../contracts/classifier";
 const PROMPT_VERSION = "v1.0";
 const TIMEOUT_MS = 2000;
 const DEFAULT_BASE = "http://127.0.0.1:11434";
-const DEFAULT_MODEL = "gemma3:latest";
+const DEFAULT_MODEL = "gemma3:4b";
 
 const SYSTEM_PROMPT = `You are an intent classifier for a personal knowledge-base assistant.
 

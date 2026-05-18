@@ -7,7 +7,7 @@ import type {
 } from "../contracts";
 
 const DEFAULT_BASE = "http://127.0.0.1:11434";
-const DEFAULT_MODEL = "gemma3:latest";
+const DEFAULT_MODEL = "gemma3:4b";
 
 interface OllamaChunk {
   message?: { content: string };
