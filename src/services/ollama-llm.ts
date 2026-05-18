@@ -46,6 +46,10 @@ export class OllamaLLMService implements LLMService {
 
   async chat(opts: ChatOptions): Promise<LLMResponse> {
     const { messages, model = DEFAULT_MODEL, onToken, signal } = opts;
+    const controller = new AbortController();
+    const combinedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -54,7 +58,7 @@ export class OllamaLLMService implements LLMService {
         messages: messages.map(toOllamaMessage),
         stream: true,
       }),
-      signal,
+      signal: combinedSignal,
     });
     if (!res.ok) throw new Error(`Ollama error: ${res.status}`);
     if (!res.body) throw new Error("No response body");
@@ -62,27 +66,32 @@ export class OllamaLLMService implements LLMService {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let full = "";
+    const tokens: string[] = [];
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let newlineAt: number;
-      while ((newlineAt = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, newlineAt).trim();
-        buffer = buffer.slice(newlineAt + 1);
-        if (!line) continue;
-        const chunk = JSON.parse(line) as OllamaChunk;
-        const token = chunk.message?.content ?? "";
-        if (token) {
-          full += token;
-          onToken?.(token);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        let newlineAt: number;
+        buffer += chunk;
+        while ((newlineAt = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineAt).trim();
+          buffer = buffer.slice(newlineAt + 1);
+          if (!line) continue;
+          const parsed = JSON.parse(line) as OllamaChunk;
+          const token = parsed.message?.content ?? "";
+          if (token) {
+            tokens.push(token);
+            onToken?.(token);
+          }
         }
       }
+    } finally {
+      clearTimeout(timeout);
     }
 
-    return { content: full };
+    return { content: tokens.join("") };
   }
 }
 
